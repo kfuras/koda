@@ -8,6 +8,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { SYSTEM_PROMPT, AGENT_DEFAULTS, CONTENT_HUB_DIR } from "./config.js";
 import { contentHubServer } from "./tools/content-hub.js";
+import { agentToolsServer } from "./tools/agent-tools.js";
 
 // --- Types ---
 
@@ -62,6 +63,29 @@ class MessageQueue {
   }
 }
 
+// --- YOLO Risk Classifier ---
+
+const HIGH_RISK_TOOLS = new Set([
+  "post_tweet", "publish_video", "quote_tweet",
+  "mcp__x-mcp__post_tweet", "mcp__x-mcp__delete_tweet",
+  "mcp__bluesky-mcp__create-post", "mcp__bluesky-mcp__delete-post",
+  "mcp__gmail__gmail_send", "mcp__gmail__gmail_trash",
+  "mcp__youtube__youtube_upload_video", "mcp__youtube__youtube_delete_video",
+  "Write", "Edit", "Bash",
+]);
+
+const MEDIUM_RISK_TOOLS = new Set([
+  "generate_image", "skool_airtable_sync",
+  "mcp__airtable__create_record", "mcp__airtable__update_records",
+  "mcp__airtable__delete_records",
+]);
+
+function classifyRisk(toolName: string): "LOW" | "MEDIUM" | "HIGH" {
+  if (HIGH_RISK_TOOLS.has(toolName)) return "HIGH";
+  if (MEDIUM_RISK_TOOLS.has(toolName)) return "MEDIUM";
+  return "LOW";
+}
+
 // --- Persistent Agent ---
 
 export class KodaAgent {
@@ -88,11 +112,31 @@ export class KodaAgent {
         maxTurns: AGENT_DEFAULTS.maxTurns,
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
+        agents: {
+          researcher: {
+            description: "Research agent for gathering information, scanning trends, reading docs, and web searches. Use for the research phase of complex tasks.",
+            prompt: "You are a research agent. Gather information thoroughly. Return structured findings. Do not take actions — only research and report.",
+            model: "sonnet",
+            tools: ["Read", "Glob", "Grep", "WebSearch", "WebFetch"],
+          },
+          implementer: {
+            description: "Implementation agent for writing code, editing files, running scripts. Use for the implementation phase after research is complete.",
+            prompt: "You are an implementation agent. Execute the plan precisely. Write clean code. Run tests. Report what you changed.",
+            model: "inherit",
+          },
+          verifier: {
+            description: "Verification agent for checking work, running tests, validating output. Use after implementation to verify everything works.",
+            prompt: "You are a verification agent. Check that implementation is correct. Run tests. Validate outputs. Report any issues found.",
+            model: "sonnet",
+            tools: ["Read", "Glob", "Grep", "Bash"],
+          },
+        },
         cwd: CONTENT_HUB_DIR,
         settingSources: ["project"],
         ...(this.sessionId ? { resume: this.sessionId } : {}),
         mcpServers: {
           "content-hub": contentHubServer,
+          "agent-tools": agentToolsServer,
           youtube: {
             command: "youtube-studio-mcp",
             args: [],
@@ -170,9 +214,23 @@ export class KodaAgent {
           console.log(`[agent] Session: ${this.sessionId}`);
         }
 
+        // YOLO Classifier — log tool use by risk level
         if (message.type === "assistant") {
           const assistantMsg = message as SDKAssistantMessage;
-          const textBlocks = (assistantMsg.message?.content ?? []).filter(
+          const content = assistantMsg.message?.content ?? [];
+
+          // Log tool calls with risk classification
+          for (const block of content) {
+            if ((block as { type: string }).type === "tool_use") {
+              const toolBlock = block as { type: string; name?: string; input?: unknown };
+              const risk = classifyRisk(toolBlock.name ?? "unknown");
+              if (risk === "HIGH") {
+                console.log(`[yolo] HIGH RISK: ${toolBlock.name} — ${JSON.stringify(toolBlock.input).slice(0, 200)}`);
+              }
+            }
+          }
+
+          const textBlocks = content.filter(
             (b: { type: string }) => b.type === "text",
           );
           if (textBlocks.length > 0) {
@@ -180,6 +238,11 @@ export class KodaAgent {
               .map((b: { type: string; text?: string }) => b.text ?? "")
               .join("\n");
           }
+        }
+
+        // Context compaction detection
+        if ((message.type as string) === "compact_boundary") {
+          console.log("[agent] Context compacted — session memory condensed");
         }
 
         if (message.type === "result") {

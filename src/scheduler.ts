@@ -1,8 +1,12 @@
 import cron from "node-cron";
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, readFile, mkdir } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { type KodaAgent } from "./agent.js";
 import { type KodaBot } from "./bot.js";
 import { CONTENT_HUB_DIR } from "./config.js";
+
+const execFileAsync = promisify(execFile);
 
 // --- Types ---
 
@@ -13,9 +17,16 @@ interface TaskDef {
   timeout?: number;
 }
 
+interface TaskResult {
+  status: "ok" | "failed" | "healed" | "exhausted";
+  error?: string;
+  timestamp: string;
+}
+
+const MAX_HEAL_ATTEMPTS = 2;
+const RESULTS_DIR = `${CONTENT_HUB_DIR}/data/.task-results`;
+
 // --- Task definitions ---
-// Cron format: minute hour day-of-month month day-of-week
-// Daily tasks staggered across the morning (07:00-09:30 Norway time)
 
 const TASKS: Record<string, TaskDef> = {
   // --- Daily ---
@@ -58,7 +69,7 @@ const TASKS: Record<string, TaskDef> = {
   skool_member_sync: {
     prompt:
       "SKOOL MEMBER SYNC: Use the skool_airtable_sync tool. " +
-      "Parse the JSON output. If there are new members, churned members, upgrades, or dowgrades, " +
+      "Parse the JSON output. If there are new members, churned members, upgrades, or downgrades, " +
       "report a summary. If no changes, log silently to data/autonomous-logs/{date}.log. " +
       "If the tool fails (e.g. Skool login issue, Airtable error), report the error.",
     cron: "0 8 * * *",
@@ -209,6 +220,32 @@ const TASKS: Record<string, TaskDef> = {
   },
 };
 
+// --- Task result tracking ---
+
+async function loadResults(date: string): Promise<Record<string, TaskResult>> {
+  await mkdir(RESULTS_DIR, { recursive: true });
+  try {
+    const data = await readFile(`${RESULTS_DIR}/${date}.json`, "utf-8");
+    return JSON.parse(data);
+  } catch {
+    return {};
+  }
+}
+
+async function saveResult(
+  date: string,
+  taskId: string,
+  result: TaskResult,
+): Promise<void> {
+  const results = await loadResults(date);
+  results[taskId] = result;
+  await mkdir(RESULTS_DIR, { recursive: true });
+  await writeFile(
+    `${RESULTS_DIR}/${date}.json`,
+    JSON.stringify(results, null, 2),
+  );
+}
+
 // --- Helpers ---
 
 function today(): string {
@@ -222,10 +259,197 @@ async function logToFile(taskName: string, text: string): Promise<void> {
   await writeFile(`${dir}/${today()}.log`, line, { flag: "a" });
 }
 
+function timestamp(): string {
+  return new Date().toISOString().slice(11, 19);
+}
+
+// --- Self-healing ---
+
+const HEAL_PROMPT = `You are the self-healing agent. A scheduled task just failed.
+Your job is to diagnose the root cause, fix the broken script/config, and re-run the task.
+You have full bash and MCP tool access.
+Read the relevant source files to understand what went wrong.
+Make minimal, targeted fixes — don't rewrite entire scripts.
+Log what you fixed to data/daily-logs/{date}.md.
+After fixing files, commit your changes to git with a descriptive message (prefix with 'fix:').
+If you can't fix it autonomously (needs human action like logging into a website),
+explain exactly what the user needs to do.`;
+
+async function selfHeal(
+  taskName: string,
+  task: TaskDef,
+  errorText: string,
+  agent: KodaAgent,
+  bot: KodaBot,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= MAX_HEAL_ATTEMPTS; attempt++) {
+    console.log(`[${taskName}] Self-heal attempt ${attempt}/${MAX_HEAL_ATTEMPTS}`);
+
+    const healPrompt =
+      `${HEAL_PROMPT}\n\n` +
+      `FAILED TASK: ${taskName}\n` +
+      `TASK DESCRIPTION: ${task.prompt}\n\n` +
+      `ERROR OUTPUT (last 2000 chars):\n\`\`\`\n${errorText.slice(-2000)}\n\`\`\`\n\n` +
+      `INSTRUCTIONS:\n` +
+      `1. Read the error and diagnose the root cause\n` +
+      `2. Read the relevant source files\n` +
+      `3. Fix the issue\n` +
+      `4. Re-run the original task to verify\n` +
+      `5. If you can't fix it, explain what the user needs to do\n\n` +
+      `Today's date: ${today()}`;
+
+    const healed = await new Promise<boolean>((resolve) => {
+      agent.send(healPrompt, async (responseText, isError) => {
+        if (!isError && !responseText.toLowerCase().includes("could not fix")) {
+          await saveResult(today(), taskName, {
+            status: "healed",
+            timestamp: timestamp(),
+          });
+          await logToFile(taskName, `HEALED on attempt ${attempt}`);
+          console.log(`[${taskName}] Self-healed on attempt ${attempt}`);
+          resolve(true);
+        } else {
+          errorText = responseText;
+          resolve(false);
+        }
+      });
+    });
+
+    if (healed) return true;
+  }
+
+  // All attempts exhausted
+  await saveResult(today(), taskName, {
+    status: "exhausted",
+    error: errorText.slice(0, 2000),
+    timestamp: timestamp(),
+  });
+  await logToFile(taskName, `EXHAUSTED after ${MAX_HEAL_ATTEMPTS} heal attempts`);
+  await bot.sendToChannel(
+    `**[HEAL FAILED]** ${taskName}\n\n` +
+    `Self-healing failed after ${MAX_HEAL_ATTEMPTS} attempts.\n` +
+    `Last error: ${errorText.slice(0, 1500)}`,
+  );
+  return false;
+}
+
+// --- Outcome checker ---
+
+async function checkOutcomes(agent: KodaAgent): Promise<void> {
+  const dir = `${CONTENT_HUB_DIR}/data/outcomes`;
+  const now = new Date();
+
+  try {
+    const { readdir } = await import("node:fs/promises");
+    const files = await readdir(dir).catch(() => [] as string[]);
+
+    for (const file of files) {
+      if (!file.endsWith(".json")) continue;
+
+      const data = JSON.parse(await readFile(`${dir}/${file}`, "utf-8"));
+      const unchecked = data.filter(
+        (o: { checked: boolean; check_at: string }) =>
+          !o.checked && new Date(o.check_at) <= now,
+      );
+
+      if (unchecked.length === 0) continue;
+
+      for (const outcome of unchecked) {
+        console.log(`[outcomes] Checking: ${outcome.content_type} — ${outcome.description}`);
+        agent.send(
+          `[OUTCOME CHECK] Check performance of this ${outcome.content_type} posted on ${outcome.posted_at}:\n` +
+          `Description: ${outcome.description}\n` +
+          `ID/URL: ${outcome.content_id}\n\n` +
+          `Pull the current metrics (likes, views, engagement). Compare to typical performance.\n` +
+          `Record your findings using the observe() tool.\n` +
+          `If it performed unusually well or poorly, note WHY you think that happened.`,
+          async () => {
+            outcome.checked = true;
+          },
+        );
+      }
+
+      await writeFile(`${dir}/${file}`, JSON.stringify(data, null, 2));
+    }
+  } catch (err) {
+    console.error("[outcomes] Check failed:", err);
+  }
+}
+
+// --- Initiative review ---
+
+async function reviewInitiatives(agent: KodaAgent, bot: KodaBot): Promise<void> {
+  const file = `${CONTENT_HUB_DIR}/data/.agent-initiatives.json`;
+  try {
+    const data = JSON.parse(await readFile(file, "utf-8"));
+    const pending = data.filter((i: { status: string; priority: string }) =>
+      i.status === "pending" && (i.priority === "medium" || i.priority === "high"),
+    );
+
+    for (const initiative of pending) {
+      await bot.sendApproval(
+        `initiative:${initiative.id}`,
+        `**Self-initiated task (${initiative.priority}):**\n${initiative.description}\n\n**Reason:** ${initiative.reason}`,
+      );
+    }
+  } catch {
+    // No initiatives file yet
+  }
+}
+
+// --- Heartbeat ---
+
+const HEARTBEAT_FILE = `${CONTENT_HUB_DIR}/data/.koda-heartbeat`;
+
+function startHeartbeat(): NodeJS.Timeout {
+  const beat = async () => {
+    try {
+      await writeFile(
+        HEARTBEAT_FILE,
+        `${Date.now()}\n${process.pid}\nkoda-agent\n`,
+      );
+    } catch {
+      // Silently ignore
+    }
+  };
+  void beat();
+  return setInterval(() => void beat(), 60_000);
+}
+
+// --- Dream cycle ---
+
+async function runDreamCycle(bot: KodaBot): Promise<void> {
+  console.log("[dream] Starting dream cycle...");
+
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      "/bin/bash",
+      [`${CONTENT_HUB_DIR}/scripts/dream-cycle.sh`],
+      {
+        cwd: CONTENT_HUB_DIR,
+        timeout: 60_000,
+      },
+    );
+
+    const output = stdout || stderr || "No output";
+    console.log(`[dream] ${output}`);
+    await logToFile("dream_cycle", output);
+
+    // Only notify Discord if something was promoted or archived
+    if (output.includes("Promoted") || output.includes("Archived")) {
+      await bot.sendToChannel(`**[dream_cycle]**\n\n${output}`);
+    }
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error("[dream] Failed:", errorMsg);
+    await logToFile("dream_cycle", `FAILED: ${errorMsg}`);
+  }
+}
+
 // --- Scheduler ---
 
 export function startScheduler(agent: KodaAgent, bot: KodaBot): void {
-  console.log(`Scheduling ${Object.keys(TASKS).length} tasks`);
+  console.log(`Scheduling ${Object.keys(TASKS).length} tasks + dream cycle`);
 
   for (const [name, task] of Object.entries(TASKS)) {
     cron.schedule(task.cron, () => {
@@ -235,6 +459,34 @@ export function startScheduler(agent: KodaAgent, bot: KodaBot): void {
     });
     console.log(`  ${name}: ${task.cron}`);
   }
+
+  // Dream cycle — 3:07 AM daily (matching old daemon)
+  cron.schedule("7 3 * * *", () => {
+    void runDreamCycle(bot);
+  }, {
+    timezone: "Europe/Oslo",
+  });
+  console.log(`  dream_cycle: 7 3 * * *`);
+
+  // Outcome checks — every 6 hours
+  cron.schedule("0 */6 * * *", () => {
+    void checkOutcomes(agent);
+  }, {
+    timezone: "Europe/Oslo",
+  });
+  console.log(`  outcome_check: 0 */6 * * *`);
+
+  // Initiative review — send pending initiatives to Discord every 2 hours
+  cron.schedule("0 */2 * * *", () => {
+    void reviewInitiatives(agent, bot);
+  }, {
+    timezone: "Europe/Oslo",
+  });
+  console.log(`  initiative_review: 0 */2 * * *`);
+
+  // Heartbeat — every 60 seconds
+  startHeartbeat();
+  console.log(`  heartbeat: every 60s`);
 }
 
 async function executeTask(
@@ -244,18 +496,41 @@ async function executeTask(
   bot: KodaBot,
 ): Promise<void> {
   const date = today();
+
+  // Skip if already succeeded today
+  const results = await loadResults(date);
+  if (results[name]?.status === "ok" || results[name]?.status === "healed") {
+    console.log(`[${date}] Skipping ${name} — already completed today`);
+    return;
+  }
+
   console.log(`[${date}] Running task: ${name}`);
 
   const fullPrompt =
     `[SCHEDULED TASK: ${name}] ${task.prompt}\n\nToday's date: ${date}`;
 
   agent.send(fullPrompt, async (responseText, isError) => {
-    await logToFile(name, `${isError ? "ERROR" : "OK"} — ${responseText.slice(0, 200)}`);
+    if (!isError) {
+      // Success
+      await saveResult(date, name, { status: "ok", timestamp: timestamp() });
+      await logToFile(name, `OK — ${responseText.slice(0, 200)}`);
 
-    if (task.type === "approval") {
-      await bot.sendApproval(name, responseText);
-    } else if (responseText.length > 10) {
-      await bot.sendToChannel(`**[${name}]**\n\n${responseText}`);
+      if (task.type === "approval") {
+        await bot.sendApproval(name, responseText);
+      } else if (responseText.length > 10) {
+        await bot.sendToChannel(`**[${name}]**\n\n${responseText}`);
+      }
+    } else {
+      // Failed — attempt self-heal
+      await saveResult(date, name, {
+        status: "failed",
+        error: responseText.slice(0, 2000),
+        timestamp: timestamp(),
+      });
+      await logToFile(name, `FAILED — ${responseText.slice(0, 200)}`);
+      console.log(`[${name}] Failed, attempting self-heal...`);
+
+      await selfHeal(name, task, responseText, agent, bot);
     }
   });
 }
