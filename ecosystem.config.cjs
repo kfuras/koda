@@ -1,8 +1,8 @@
 module.exports = {
   apps: [{
     name: "koda",
-    script: "npx",
-    args: "tsx src/index.ts",
+    script: "/bin/bash",
+    args: "-c 'source ~/.secrets.zsh 2>/dev/null; npx tsx src/index.ts'",
     cwd: "/Users/YOUR_USERNAME/code/koda",
     watch: false,
     autorestart: true,
