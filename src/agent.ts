@@ -142,23 +142,23 @@ export class KodaAgent {
             args: [],
           },
           "x-mcp": {
-            command: "python3",
-            args: ["/Users/YOUR_USERNAME/code/content-hub/servers/x_mcp_server.py"],
+            command: process.env.X_MCP_COMMAND ?? "python3",
+            args: [process.env.X_MCP_PATH ?? `${CONTENT_HUB_DIR}/servers/x_mcp_server.py`],
           },
           "bluesky-mcp": {
             command: "npx",
             args: ["-y", "@semihberkay/bluesky-mcp"],
             env: {
-              BLUESKY_IDENTIFIER: "kjetilfuras.bsky.social",
+              BLUESKY_IDENTIFIER: process.env.BLUESKY_HANDLE ?? "kjetilfuras.bsky.social",
               BLUESKY_PASSWORD: process.env.BLUESKY_APP_PASSWORD ?? "",
             },
           },
           gmail: {
-            command: "/Users/YOUR_USERNAME/code/gmail-mcp/.venv/bin/python",
-            args: ["/Users/YOUR_USERNAME/code/gmail-mcp/server.py"],
+            command: process.env.GMAIL_MCP_PYTHON ?? "/Users/YOUR_USERNAME/code/gmail-mcp/.venv/bin/python",
+            args: [process.env.GMAIL_MCP_PATH ?? "/Users/YOUR_USERNAME/code/gmail-mcp/server.py"],
           },
           airtable: {
-            command: "/Users/YOUR_USERNAME/code/n8n-assistant/scripts/run-airtable-mcp.sh",
+            command: process.env.AIRTABLE_MCP_COMMAND ?? "/Users/YOUR_USERNAME/code/n8n-assistant/scripts/run-airtable-mcp.sh",
             args: [],
           },
         },

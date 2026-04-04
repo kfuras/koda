@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 import { resolve } from "node:path";
 
 // Load content-hub .env first (has all the API keys), then local .env for overrides
-dotenv.config({ path: resolve("/Users/YOUR_USERNAME/code/content-hub/.env") });
+dotenv.config({ path: resolve(process.env.CONTENT_HUB_DIR ?? "/Users/YOUR_USERNAME/code/content-hub", ".env") });
 dotenv.config(); // local .env can override
 
 // --- Environment ---
@@ -32,7 +32,7 @@ export const TICK_INTERVAL_MS = parseInt(process.env.TICK_INTERVAL_MS ?? "300000
 
 // --- Agent defaults ---
 
-export const CONTENT_HUB_DIR = "/Users/YOUR_USERNAME/code/content-hub";
+export const CONTENT_HUB_DIR = process.env.CONTENT_HUB_DIR ?? "/Users/YOUR_USERNAME/code/content-hub";
 export const SCRIPTS_DIR = `${CONTENT_HUB_DIR}/scripts`;
 
 export const AGENT_DEFAULTS = {

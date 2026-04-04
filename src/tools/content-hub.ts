@@ -160,7 +160,7 @@ const skoolAirtableSync = tool(
     if (dry_run) args.push("--dry-run");
     if (export_only) args.push("--export");
     const { stdout } = await execFileAsync(PYTHON, [
-      "/Users/YOUR_USERNAME/code/scripts/skool-airtable-sync.py",
+      process.env.SKOOL_SYNC_PATH ?? "/Users/YOUR_USERNAME/code/scripts/skool-airtable-sync.py",
       ...args,
     ], {
       cwd: CONTENT_HUB_DIR,

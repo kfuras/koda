@@ -87,7 +87,7 @@ const TASKS: Record<string, TaskDef> = {
   x_feed_scan: {
     prompt:
       "X FEED SCAN: Run the X feed scanner script: " +
-      "node /Users/YOUR_USERNAME/code/content-hub/scripts/x-feed-scanner.js --limit 30 --json. " +
+      "node scripts/x-feed-scanner.js --limit 30 --json. " +
       "Read the results and create a digest with the top 3-5 most interesting posts " +
       "(highest engagement + most relevant to Build & Automate or Notipo). " +
       "Include: author, topic, engagement numbers, and one sentence on what we can learn from it. " +
