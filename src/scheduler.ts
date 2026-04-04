@@ -38,6 +38,17 @@ const TASKS: Record<string, TaskDef> = {
     cron: "0 7 * * *",
     type: "silent",
   },
+  gsc_analytics: {
+    prompt:
+      "Pull Google Search Console analytics for the last 7 days. " +
+      "Use gsc_search_analytics for both sc-domain:notipo.com and https://kjetilfuras.com/. " +
+      "Check top queries (clicks, impressions, CTR, position). " +
+      "Log to data/analytics/{date}.json alongside other analytics. " +
+      "Record observations about trending queries or ranking changes. " +
+      "If any page dropped significantly in position or a new query appeared in top 10, report it.",
+    cron: "45 8 * * *",
+    type: "silent",
+  },
   instagram_analytics: {
     prompt:
       "Pull Instagram analytics for @kjetilfuras. " +
