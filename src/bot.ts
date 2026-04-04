@@ -14,12 +14,32 @@ import {
   DISCORD_BOT_TOKEN,
   DISCORD_ALLOWED_CHANNELS,
   DISCORD_MENTION_ONLY,
+  DISCORD_PROACTIVE_CHANNEL,
   CONTENT_HUB_DIR,
 } from "./config.js";
 import { type KodaAgent } from "./agent.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const THREAD_THRESHOLD = 2000; // Create thread if response exceeds this
+
+// --- Frustration detection ---
+
+const FRUSTRATION_PATTERNS = [
+  /\bwtf\b/i, /\bwth\b/i, /\bomg\b/i,
+  /\bbroken\b/i, /\bdoesn'?t work/i, /\bnot working/i,
+  /\bstill broken/i, /\bstill not/i, /\bagain\?/i,
+  /\bwhy (won'?t|can'?t|isn'?t|doesn'?t)/i,
+  /\bthis (sucks|is terrible|is awful|is garbage)/i,
+  /\bffs\b/i, /\bjfc\b/i, /\bugh\b/i,
+  /\bseriously\?/i, /\bcome on\b/i,
+  /\bi (said|told you|already)/i,
+  /[!?]{3,}/, // Multiple !!! or ???
+  /\b(stupid|useless|terrible|awful|horrible)\b/i,
+];
+
+function detectFrustration(text: string): boolean {
+  return FRUSTRATION_PATTERNS.some((p) => p.test(text));
+}
 
 // --- Message chunking ---
 
@@ -96,6 +116,8 @@ export class KodaBot {
   private client: Client;
   private agent: KodaAgent;
   private approvalMessages = new Map<string, string>(); // messageId → taskName
+  private lastUserActivity = 0; // timestamp of last user message
+  private userIdleThresholdMs = 15 * 60_000; // 15 min = idle
 
   constructor(agent: KodaAgent) {
     this.agent = agent;
@@ -105,10 +127,15 @@ export class KodaBot {
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.GuildVoiceStates,
       ],
     });
 
     this.setupHandlers();
+  }
+
+  isUserIdle(): boolean {
+    return Date.now() - this.lastUserActivity > this.userIdleThresholdMs;
   }
 
   async start(): Promise<void> {
@@ -126,6 +153,24 @@ export class KodaBot {
       }
     } catch (err) {
       console.error("Failed to send startup message:", err);
+    }
+  }
+
+  async sendProactive(text: string, files?: string[]): Promise<void> {
+    const channelId = DISCORD_PROACTIVE_CHANNEL || DISCORD_ALLOWED_CHANNELS.values().next().value;
+    if (!channelId) return;
+
+    const channel = await this.client.channels.fetch(channelId) as TextChannel | null;
+    if (!channel) return;
+
+    const attachments = await this.buildAttachments(files ?? []);
+    const chunks = chunkMessage(text);
+
+    for (let i = 0; i < chunks.length; i++) {
+      await channel.send({
+        content: chunks[i],
+        files: i === 0 ? attachments : undefined,
+      });
     }
   }
 
@@ -191,6 +236,12 @@ export class KodaBot {
       return;
     }
 
+    // Track user activity for focus awareness
+    this.lastUserActivity = Date.now();
+
+    // Skip ! commands — handled by other listeners (voice, etc.)
+    if (message.content.trim().startsWith("!")) return;
+
     let content = message.content.trim();
 
     // Mention-only mode: skip if not mentioned
@@ -210,9 +261,20 @@ export class KodaBot {
     }, 5_000);
     await channel.sendTyping().catch(() => {});
 
+    // Frustration detection
+    const frustrated = detectFrustration(content);
+
     // Build message with username context
     const username = message.author.displayName || message.author.username;
     const promptParts: string[] = [];
+
+    if (frustrated) {
+      promptParts.push(
+        "[SYSTEM: User seems frustrated. Acknowledge their frustration briefly. " +
+        "Be extra careful and precise. Ask clarifying questions if unsure. " +
+        "Don't be defensive — focus on solving the problem.]",
+      );
+    }
 
     if (content) {
       promptParts.push(`[${username}] ${content}`);

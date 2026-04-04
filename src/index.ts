@@ -1,6 +1,13 @@
 import { KodaAgent } from "./agent.js";
 import { KodaBot } from "./bot.js";
 import { startScheduler } from "./scheduler.js";
+import { startWebhookServer } from "./webhooks.js";
+import { setupVoiceCommands } from "./voice.js";
+
+// Prevent unhandled errors from crashing the process
+process.on("unhandledRejection", (err) => {
+  console.error("[unhandled]", err);
+});
 
 async function main() {
   console.log("Starting Koda agent...");
@@ -16,7 +23,13 @@ async function main() {
   // 3. Start scheduler (feeds tasks into agent via bot)
   startScheduler(agent, bot);
 
-  // 4. Announce we're online
+  // 4. Start GitHub webhook listener
+  startWebhookServer(agent, bot);
+
+  // 5. Setup voice channel commands
+  setupVoiceCommands(bot, agent);
+
+  // 6. Announce we're online
   await bot.sendStartupMessage();
 
   // Graceful shutdown

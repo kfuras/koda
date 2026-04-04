@@ -168,10 +168,70 @@ const trackOutcome = tool(
   },
 );
 
+// --- ULTRAPLAN ---
+
+const PLANS_DIR = `${CONTENT_HUB_DIR}/data/plans`;
+
+const ultraplan = tool(
+  "ultraplan",
+  "Create a detailed execution plan for a complex, multi-step task. " +
+  "Use this when a task requires research, multiple phases, or coordination. " +
+  "The plan is saved to disk and sent to Discord for user approval before execution. " +
+  "Do NOT execute the plan — only create it. Wait for approval.",
+  {
+    title: z.string().describe("Short title for the plan"),
+    goal: z.string().describe("What this plan aims to achieve"),
+    phases: z.array(z.object({
+      name: z.string(),
+      description: z.string(),
+      agent: z.enum(["researcher", "implementer", "verifier"]).optional(),
+      estimated_turns: z.number().optional(),
+    })).describe("Ordered phases of execution"),
+    risks: z.array(z.string()).optional().describe("What could go wrong"),
+    success_criteria: z.array(z.string()).describe("How to know the plan succeeded"),
+  },
+  async ({ title, goal, phases, risks, success_criteria }) => {
+    await mkdir(PLANS_DIR, { recursive: true });
+
+    const plan = {
+      id: `plan-${Date.now()}`,
+      title,
+      goal,
+      phases,
+      risks: risks ?? [],
+      success_criteria,
+      created: new Date().toISOString(),
+      status: "pending_approval",
+    };
+
+    const file = `${PLANS_DIR}/${plan.id}.json`;
+    await writeFile(file, JSON.stringify(plan, null, 2));
+
+    // Format for Discord
+    const phasesText = phases
+      .map((p, i) => `${i + 1}. **${p.name}**${p.agent ? ` (${p.agent})` : ""}: ${p.description}`)
+      .join("\n");
+    const risksText = (risks ?? []).length > 0
+      ? `\n**Risks:**\n${risks!.map(r => `- ${r}`).join("\n")}`
+      : "";
+    const criteriaText = success_criteria.map(c => `- ${c}`).join("\n");
+
+    return textResult(
+      `**ULTRAPLAN: ${title}**\n` +
+      `**Goal:** ${goal}\n\n` +
+      `**Phases:**\n${phasesText}\n` +
+      `${risksText}\n` +
+      `**Success criteria:**\n${criteriaText}\n\n` +
+      `Plan saved as ${plan.id}. Send this to Discord for approval. ` +
+      `When approved, execute phases in order using the appropriate subagents.`,
+    );
+  },
+);
+
 // --- MCP Server ---
 
 export const agentToolsServer = createSdkMcpServer({
   name: "agent-tools",
   version: "0.1.0",
-  tools: [observe, proposeTask, trackOutcome],
+  tools: [observe, proposeTask, trackOutcome, ultraplan],
 });

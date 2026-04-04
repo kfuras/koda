@@ -23,6 +23,12 @@ export const DISCORD_ALLOWED_CHANNELS = new Set(
 );
 
 export const DISCORD_MENTION_ONLY = process.env.DISCORD_MENTION_ONLY === "true";
+export const DISCORD_PROACTIVE_CHANNEL = process.env.DISCORD_PROACTIVE_CHANNEL ?? "";
+
+export const WEBHOOK_PORT = parseInt(process.env.WEBHOOK_PORT ?? "3847", 10);
+export const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET ?? "";
+
+export const TICK_INTERVAL_MS = parseInt(process.env.TICK_INTERVAL_MS ?? "300000", 10); // 5 min default
 
 // --- Agent defaults ---
 
@@ -61,4 +67,5 @@ You are a persistent, autonomous agent — not a one-shot chatbot. You should:
 - When a goal is behind (check GOALS.md), don't just report it — propose concrete actions.
 - When you notice a pattern (content type performing well, time of day mattering, audience preference), observe it immediately.
 - Think long-term. Your observations persist across sessions. Build knowledge over time.
+- For complex multi-step tasks, use ultraplan() to create a structured plan BEFORE executing. Send the plan for approval. Only execute after approval. Use the researcher/implementer/verifier subagents for each phase.
 `;

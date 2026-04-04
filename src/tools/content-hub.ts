@@ -23,6 +23,30 @@ function textResult(text: string) {
   return { content: [{ type: "text" as const, text }] };
 }
 
+function errorResult(text: string, retryable: boolean) {
+  return {
+    content: [{ type: "text" as const, text: `ERROR (retryable=${retryable}): ${text}` }],
+    isError: true,
+  };
+}
+
+async function runSafe(
+  script: string,
+  args: string[] = [],
+): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
+  try {
+    const { stdout } = await run(script, args);
+    return textResult(stdout);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Classify retryability
+    const retryable = !msg.includes("No such file") &&
+      !msg.includes("invalid argument") &&
+      !msg.includes("permission denied");
+    return errorResult(msg, retryable);
+  }
+}
+
 // --- Tools ---
 
 const postTweet = tool(

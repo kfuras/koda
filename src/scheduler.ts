@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { type KodaAgent } from "./agent.js";
 import { type KodaBot } from "./bot.js";
-import { CONTENT_HUB_DIR } from "./config.js";
+import { CONTENT_HUB_DIR, TICK_INTERVAL_MS } from "./config.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -416,6 +416,39 @@ function startHeartbeat(): NodeJS.Timeout {
   return setInterval(() => void beat(), 60_000);
 }
 
+// --- Tick-based autonomous loop ---
+
+function startTickLoop(agent: KodaAgent, bot: KodaBot): NodeJS.Timeout {
+  const tick = () => {
+    const userIdle = bot.isUserIdle();
+    const date = today();
+    const hour = new Date().getHours();
+
+    // Only tick during waking hours (7 AM - 11 PM Norway time)
+    if (hour < 7 || hour > 23) return;
+
+    const tickPrompt =
+      `[TICK] Autonomous check-in. User is ${userIdle ? "IDLE/OFFLINE" : "ACTIVE"}.` +
+      ` Date: ${date}, time: ${new Date().toTimeString().slice(0, 5)}.` +
+      `\n\nEvaluate:` +
+      `\n1. Any pending initiatives in data/.agent-initiatives.json that are approved but not done?` +
+      `\n2. Any observations you should act on?` +
+      `\n3. Any goals in GOALS.md falling behind that need attention?` +
+      `\n4. Any outcome checks due (content posted > 24h ago)?` +
+      `\n\nAutonomy level: ${userIdle ? "HIGH — you may execute low and medium priority tasks without approval. Still ask for high priority." : "NORMAL — propose tasks, wait for approval on medium/high priority."}` +
+      `\n\nIf nothing needs attention, respond with just "tick ok" and nothing else. Do NOT read files unless you have a specific reason to.`;
+
+    agent.send(tickPrompt, async (responseText) => {
+      // Only send to proactive channel if the agent actually did something
+      if (responseText && !responseText.toLowerCase().includes("tick ok")) {
+        await bot.sendProactive(`**[tick]** ${responseText}`);
+      }
+    });
+  };
+
+  return setInterval(tick, TICK_INTERVAL_MS);
+}
+
 // --- Dream cycle ---
 
 async function runDreamCycle(bot: KodaBot): Promise<void> {
@@ -487,6 +520,10 @@ export function startScheduler(agent: KodaAgent, bot: KodaBot): void {
   // Heartbeat — every 60 seconds
   startHeartbeat();
   console.log(`  heartbeat: every 60s`);
+
+  // Tick-based autonomous loop
+  startTickLoop(agent, bot);
+  console.log(`  tick_loop: every ${TICK_INTERVAL_MS / 1000}s`);
 }
 
 async function executeTask(
