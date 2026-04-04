@@ -9,6 +9,7 @@ import { resolve } from "node:path";
 import { SYSTEM_PROMPT, AGENT_DEFAULTS, CONTENT_HUB_DIR } from "./config.js";
 import { contentHubServer } from "./tools/content-hub.js";
 import { agentToolsServer } from "./tools/agent-tools.js";
+import { gscServer } from "./tools/gsc.js";
 
 // --- Types ---
 
@@ -137,6 +138,7 @@ export class KodaAgent {
         mcpServers: {
           "content-hub": contentHubServer,
           "agent-tools": agentToolsServer,
+          gsc: gscServer,
           context7: {
             command: "npx",
             args: ["-y", "@upstash/context7-mcp"],
