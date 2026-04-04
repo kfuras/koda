@@ -137,6 +137,10 @@ export class KodaAgent {
         mcpServers: {
           "content-hub": contentHubServer,
           "agent-tools": agentToolsServer,
+          context7: {
+            command: "npx",
+            args: ["-y", "@upstash/context7-mcp"],
+          },
           youtube: {
             command: "youtube-studio-mcp",
             args: [],
