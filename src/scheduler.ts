@@ -1,8 +1,8 @@
 import cron from "node-cron";
 import { writeFile, mkdir } from "node:fs/promises";
-import { type Client, type TextChannel } from "discord.js";
-import { runAgent } from "./agent.js";
-import { CONTENT_HUB_DIR, DISCORD_ALLOWED_CHANNELS } from "./config.js";
+import { type KodaAgent } from "./agent.js";
+import { type KodaBot } from "./bot.js";
+import { CONTENT_HUB_DIR } from "./config.js";
 
 // --- Types ---
 
@@ -12,18 +12,6 @@ interface TaskDef {
   type: "silent" | "approval";
   timeout?: number;
 }
-
-// --- Preamble injected into every task ---
-
-const TASK_PREAMBLE = `You are the autonomous agent for content-hub.
-You have full bash and MCP tool access.
-Read CLAUDE.md, SOUL.md, and USER.md for context.
-Read LEARNINGS.md before making content decisions.
-Match Kjetil's voice (see voice-reference.md).
-Save any drafts to data/drafts/ immediately.
-For approval tasks: draft content, send result back — DO NOT publish without user confirming.
-For silent tasks: execute quietly, log results, only report if notable.
-Log what you did to data/daily-logs/{date}.md when done.`;
 
 // --- Task definitions ---
 // Cron format: minute hour day-of-month month day-of-week
@@ -36,7 +24,7 @@ const TASKS: Record<string, TaskDef> = {
       "Pull YouTube 7-day analytics (views, subs, watch time, likes). " +
       "Save snapshot to data/analytics/{date}.json. " +
       "If anything notable (milestone, big change), report it.",
-    cron: "0 7 * * *", // 07:00
+    cron: "0 7 * * *",
     type: "silent",
   },
   instagram_analytics: {
@@ -45,7 +33,7 @@ const TASKS: Record<string, TaskDef> = {
       "Use the instagram_analytics tool with save=true. " +
       "Log follower count + top performing recent posts to data/autonomous-logs/{date}.log. " +
       "If any Reel got notable engagement (>50 plays or >5 likes), report it.",
-    cron: "15 7 * * *", // 07:15
+    cron: "15 7 * * *",
     type: "silent",
   },
   bluesky_stats: {
@@ -57,23 +45,23 @@ const TASKS: Record<string, TaskDef> = {
       "Then check the Bluesky timeline (get-timeline, limit 20) for trending AI/automation/Claude topics. " +
       "Log findings to data/autonomous-logs/{date}.log. Only report if highly relevant. " +
       "IMPORTANT: If you get a rate limit error from Bluesky, skip it gracefully and log 'Bluesky rate limited' — do not retry.",
-    cron: "30 7 * * *", // 07:30
+    cron: "30 7 * * *",
     type: "silent",
   },
   learnings_review: {
     prompt:
       "Read the last 3 daily logs and check if LEARNINGS.md needs updating. " +
       "Keep it under 100 lines.",
-    cron: "45 7 * * *", // 07:45
+    cron: "45 7 * * *",
     type: "silent",
   },
   skool_member_sync: {
     prompt:
       "SKOOL MEMBER SYNC: Use the skool_airtable_sync tool. " +
-      "Parse the JSON output. If there are new members, churned members, upgrades, or downgrades, " +
+      "Parse the JSON output. If there are new members, churned members, upgrades, or dowgrades, " +
       "report a summary. If no changes, log silently to data/autonomous-logs/{date}.log. " +
       "If the tool fails (e.g. Skool login issue, Airtable error), report the error.",
-    cron: "0 8 * * *", // 08:00
+    cron: "0 8 * * *",
     type: "silent",
   },
   goal_check: {
@@ -82,7 +70,7 @@ const TASKS: Record<string, TaskDef> = {
       "Identify which goal has the biggest gap. Log the assessment to data/autonomous-logs/{date}.log. " +
       "If a goal is significantly behind, include a brief note about what action could help " +
       "(but don't take action without approval).",
-    cron: "15 8 * * *", // 08:15
+    cron: "15 8 * * *",
     type: "silent",
   },
   x_feed_scan: {
@@ -94,7 +82,7 @@ const TASKS: Record<string, TaskDef> = {
       "Include: author, topic, engagement numbers, and one sentence on what we can learn from it. " +
       "If cookies expire, try: node scripts/export-x-cookies.js to re-export, then retry. " +
       "If Chrome has no valid X session, report that the user needs to log into x.com in Chrome.",
-    cron: "30 8 * * *", // 08:30
+    cron: "30 8 * * *",
     type: "silent",
     timeout: 600,
   },
@@ -110,7 +98,7 @@ const TASKS: Record<string, TaskDef> = {
       "Save drafts to data/drafts/quote-tweet-drafts-{date}.md. " +
       "Report the top 3 drafts with original tweet URLs for approval. " +
       "DO NOT post without approval.",
-    cron: "0 9 * * *", // 09:00
+    cron: "0 9 * * *",
     type: "approval",
     timeout: 600,
   },
@@ -123,11 +111,11 @@ const TASKS: Record<string, TaskDef> = {
       "The CTA should bridge the tweet topic to the product — not 'follow for more'. " +
       "Report drafts for approval. " +
       "If approved, run: python3 scripts/cta_reply.py --min-likes 10 --post",
-    cron: "30 9 * * *", // 09:30
+    cron: "30 9 * * *",
     type: "approval",
   },
 
-  // --- Every 3 days (run on days 1,4,7,10,13,16,19,22,25,28) ---
+  // --- Every 3 days ---
   content_proposal: {
     prompt:
       "CONTENT PROPOSAL: Read GOALS.md to identify the biggest gap. Read LEARNINGS.md for " +
@@ -137,7 +125,7 @@ const TASKS: Record<string, TaskDef> = {
       "Draft 2-3 content ideas (Short, social post, or Skool lesson) that move the needle " +
       "on the weakest goal. Report proposals with trending data backing each idea. " +
       "DO NOT create or publish anything without approval.",
-    cron: "0 10 1,4,7,10,13,16,19,22,25,28 * *", // 10:00 every 3 days
+    cron: "0 10 1,4,7,10,13,16,19,22,25,28 * *",
     type: "approval",
   },
   social_post: {
@@ -147,7 +135,7 @@ const TASKS: Record<string, TaskDef> = {
       "last time (check data/drafts/ for recent posts). Draft the post matching Kjetil's voice " +
       "(see voice-reference.md). Use the generate_image tool if relevant. Report the draft + " +
       "image for approval. DO NOT post without explicit approval.",
-    cron: "0 11 2,5,8,11,14,17,20,23,26,29 * *", // 11:00, offset by 1 day
+    cron: "0 11 2,5,8,11,14,17,20,23,26,29 * *",
     type: "approval",
   },
   skool_post: {
@@ -157,7 +145,7 @@ const TASKS: Record<string, TaskDef> = {
       "of the daemon/pipeline. Match Kjetil's practitioner voice. Use the generate_image tool " +
       "(ALWAYS include an image). Report the draft + image for approval. " +
       "Label: General discussion. DO NOT post without explicit approval.",
-    cron: "0 11 3,6,9,12,15,18,21,24,27,30 * *", // 11:00, offset by 2 days
+    cron: "0 11 3,6,9,12,15,18,21,24,27,30 * *",
     type: "approval",
   },
   x_article: {
@@ -174,7 +162,7 @@ const TASKS: Record<string, TaskDef> = {
       "7. Save to data/drafts/article-{date}-SLUG.md " +
       "8. Report headline options + article preview for approval " +
       "EVERY CLAIM must be verifiable against actual code. NO hallucinations.",
-    cron: "0 10 3,6,9,12,15,18,21,24,27,30 * *", // 10:00 every 3 days
+    cron: "0 10 3,6,9,12,15,18,21,24,27,30 * *",
     type: "approval",
     timeout: 900,
   },
@@ -186,7 +174,7 @@ const TASKS: Record<string, TaskDef> = {
       "Pull X post stats using get_my_tweets MCP tool (weekly only — X API burns credits). " +
       "Pull Bluesky post stats. Check Skool for fresh content this week. " +
       "Format as a summary (code blocks for stats, bold for highlights). Report it.",
-    cron: "0 10 * * 1", // Monday 10:00
+    cron: "0 10 * * 1",
     type: "silent",
   },
   meta_token_check: {
@@ -195,7 +183,7 @@ const TASKS: Record<string, TaskDef> = {
       "If it exits with code 1 (token expiring soon), run without --check to refresh. " +
       "Log result to data/autonomous-logs/{date}.log. " +
       "If refresh fails, report that the Meta token needs manual renewal.",
-    cron: "0 8 * * 0", // Sunday 08:00
+    cron: "0 8 * * 0",
     type: "silent",
   },
   voice_profile_refresh: {
@@ -206,7 +194,7 @@ const TASKS: Record<string, TaskDef> = {
       "If there are new posts to analyze, fetch and read them, then update data/voice-profile.json. " +
       "Keep existing structure — only add/update, don't remove working patterns. " +
       "Log what changed to data/autonomous-logs/{date}.log.",
-    cron: "0 9 * * 6", // Saturday 09:00
+    cron: "0 9 * * 6",
     type: "silent",
   },
   lesson_draft: {
@@ -216,7 +204,7 @@ const TASKS: Record<string, TaskDef> = {
       "step-by-step instructions, and practical examples. Save draft to data/drafts/. " +
       "Report outline for approval before pushing to Skool. Set level 1 access. " +
       "DO NOT push without explicit approval.",
-    cron: "0 11 * * 5", // Friday 11:00
+    cron: "0 11 * * 5",
     type: "approval",
   },
 };
@@ -236,12 +224,12 @@ async function logToFile(taskName: string, text: string): Promise<void> {
 
 // --- Scheduler ---
 
-export function startScheduler(discordClient: Client): void {
+export function startScheduler(agent: KodaAgent, bot: KodaBot): void {
   console.log(`Scheduling ${Object.keys(TASKS).length} tasks`);
 
   for (const [name, task] of Object.entries(TASKS)) {
     cron.schedule(task.cron, () => {
-      void executeTask(name, task, discordClient);
+      void executeTask(name, task, agent, bot);
     }, {
       timezone: "Europe/Oslo",
     });
@@ -252,71 +240,22 @@ export function startScheduler(discordClient: Client): void {
 async function executeTask(
   name: string,
   task: TaskDef,
-  discordClient: Client,
+  agent: KodaAgent,
+  bot: KodaBot,
 ): Promise<void> {
   const date = today();
   console.log(`[${date}] Running task: ${name}`);
 
-  const fullPrompt = `${TASK_PREAMBLE}\n\nTASK: ${task.prompt}\n\nToday's date: ${date}`;
+  const fullPrompt =
+    `[SCHEDULED TASK: ${name}] ${task.prompt}\n\nToday's date: ${date}`;
 
-  try {
-    const result = await runAgent(fullPrompt);
-    await logToFile(name, `OK (${result.turns} turns, $${result.costUsd.toFixed(2)}) — ${result.text.slice(0, 200)}`);
+  agent.send(fullPrompt, async (responseText, isError) => {
+    await logToFile(name, `${isError ? "ERROR" : "OK"} — ${responseText.slice(0, 200)}`);
 
-    // Send to Discord if approval task, or if silent task returned notable content
-    if (task.type === "approval" || (result.text.length > 10 && task.type === "silent")) {
-      await sendToDiscord(discordClient, name, task.type, result.text);
+    if (task.type === "approval") {
+      await bot.sendApproval(name, responseText);
+    } else if (responseText.length > 10) {
+      await bot.sendToChannel(`**[${name}]**\n\n${responseText}`);
     }
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error(`[${name}] Failed:`, errorMsg);
-    await logToFile(name, `FAILED: ${errorMsg}`);
-    await sendToDiscord(discordClient, name, "silent", `Task **${name}** failed:\n${errorMsg.slice(0, 1800)}`);
-  }
-}
-
-async function sendToDiscord(
-  client: Client,
-  taskName: string,
-  type: "silent" | "approval",
-  text: string,
-): Promise<void> {
-  // Find the first allowed channel to post in
-  const channelId = DISCORD_ALLOWED_CHANNELS.values().next().value;
-  if (!channelId) return;
-
-  const channel = await client.channels.fetch(channelId) as TextChannel | null;
-  if (!channel) return;
-
-  const prefix = type === "approval" ? `**[APPROVAL NEEDED]** ${taskName}\n\n` : `**[${taskName}]**\n\n`;
-  const content = prefix + text;
-
-  // Chunk if needed
-  const chunks = chunkText(content, 2000);
-  for (const chunk of chunks) {
-    const msg = await channel.send(chunk);
-    // Add approval reactions for approval tasks (first message only)
-    if (type === "approval" && msg === (await channel.messages.fetch(msg.id))) {
-      await msg.react("✅");
-      await msg.react("❌");
-    }
-  }
-}
-
-function chunkText(text: string, max: number): string[] {
-  if (text.length <= max) return [text];
-  const chunks: string[] = [];
-  let remaining = text;
-  while (remaining.length > 0) {
-    if (remaining.length <= max) {
-      chunks.push(remaining);
-      break;
-    }
-    let splitAt = remaining.lastIndexOf("\n", max);
-    if (splitAt < max / 2) splitAt = remaining.lastIndexOf(" ", max);
-    if (splitAt < max / 2) splitAt = max;
-    chunks.push(remaining.slice(0, splitAt));
-    remaining = remaining.slice(splitAt).trimStart();
-  }
-  return chunks;
+  });
 }

@@ -22,6 +22,8 @@ export const DISCORD_ALLOWED_CHANNELS = new Set(
     .filter(Boolean),
 );
 
+export const DISCORD_MENTION_ONLY = process.env.DISCORD_MENTION_ONLY === "true";
+
 // --- Agent defaults ---
 
 export const CONTENT_HUB_DIR = "/Users/YOUR_USERNAME/code/content-hub";

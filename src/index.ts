@@ -1,16 +1,30 @@
-import { startBot } from "./bot.js";
+import { KodaAgent } from "./agent.js";
+import { KodaBot } from "./bot.js";
 import { startScheduler } from "./scheduler.js";
 
 async function main() {
   console.log("Starting Koda agent...");
-  const client = await startBot();
-  startScheduler(client);
+
+  // 1. Start persistent agent session
+  const agent = new KodaAgent();
+  await agent.start();
+
+  // 2. Start Discord bot (feeds messages into agent)
+  const bot = new KodaBot(agent);
+  await bot.start();
+
+  // 3. Start scheduler (feeds tasks into agent via bot)
+  startScheduler(agent, bot);
+
+  // 4. Announce we're online
+  await bot.sendStartupMessage();
 
   // Graceful shutdown
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    process.on(signal, () => {
+    process.on(signal, async () => {
       console.log(`Received ${signal}, shutting down...`);
-      client.destroy();
+      await agent.stop();
+      bot.getClient().destroy();
       process.exit(0);
     });
   }
