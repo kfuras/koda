@@ -24,6 +24,13 @@ export const DISCORD_ALLOWED_CHANNELS = new Set(
 
 export const DISCORD_MENTION_ONLY = process.env.DISCORD_MENTION_ONLY === "true";
 export const DISCORD_PROACTIVE_CHANNEL = process.env.DISCORD_PROACTIVE_CHANNEL ?? "";
+export const DISCORD_ALLOWED_USERS = new Set(
+  (process.env.DISCORD_ALLOWED_USERS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+export const RATE_LIMIT_MS = parseInt(process.env.RATE_LIMIT_MS ?? "10000", 10);
 
 export const WEBHOOK_PORT = parseInt(process.env.WEBHOOK_PORT ?? "3847", 10);
 export const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET ?? "";

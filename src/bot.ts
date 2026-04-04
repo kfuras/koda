@@ -15,6 +15,8 @@ import {
   DISCORD_ALLOWED_CHANNELS,
   DISCORD_MENTION_ONLY,
   DISCORD_PROACTIVE_CHANNEL,
+  DISCORD_ALLOWED_USERS,
+  RATE_LIMIT_MS,
   CONTENT_HUB_DIR,
 } from "./config.js";
 import { type KodaAgent } from "./agent.js";
@@ -118,6 +120,8 @@ export class KodaBot {
   private approvalMessages = new Map<string, string>(); // messageId → taskName
   private lastUserActivity = 0; // timestamp of last user message
   private userIdleThresholdMs = 15 * 60_000; // 15 min = idle
+  private lastMessageTime = new Map<string, number>(); // userId → timestamp (rate limiting)
+  private startTime = Date.now();
 
   constructor(agent: KodaAgent) {
     this.agent = agent;
@@ -216,6 +220,31 @@ export class KodaBot {
     return this.client;
   }
 
+  private async sendStatus(message: Message): Promise<void> {
+    const uptime = Math.floor((Date.now() - this.startTime) / 1000);
+    const hours = Math.floor(uptime / 3600);
+    const minutes = Math.floor((uptime % 3600) / 60);
+
+    const mem = process.memoryUsage();
+    const heapMB = (mem.heapUsed / 1024 / 1024).toFixed(1);
+    const rssMB = (mem.rss / 1024 / 1024).toFixed(1);
+
+    const status = [
+      "```",
+      `Koda Agent Status`,
+      `─────────────────`,
+      `Uptime:    ${hours}h ${minutes}m`,
+      `PID:       ${process.pid}`,
+      `Memory:    ${heapMB} MB heap / ${rssMB} MB RSS`,
+      `User idle: ${this.isUserIdle() ? "yes" : "no"}`,
+      `Session:   persistent streaming`,
+      `Node:      ${process.version}`,
+      "```",
+    ].join("\n");
+
+    await message.reply({ content: status, allowedMentions: { repliedUser: false } });
+  }
+
   private setupHandlers(): void {
     this.client.once("ready", () => {
       console.log(`Discord bot logged in as ${this.client.user?.tag}`);
@@ -236,11 +265,29 @@ export class KodaBot {
       return;
     }
 
+    // Allowed users check
+    if (DISCORD_ALLOWED_USERS.size > 0 && !DISCORD_ALLOWED_USERS.has(message.author.id)) {
+      return;
+    }
+
     // Track user activity for focus awareness
     this.lastUserActivity = Date.now();
 
-    // Skip ! commands — handled by other listeners (voice, etc.)
-    if (message.content.trim().startsWith("!")) return;
+    // Handle ! commands
+    const trimmed = message.content.trim().toLowerCase();
+    if (trimmed === "!status") {
+      await this.sendStatus(message);
+      return;
+    }
+    if (trimmed.startsWith("!")) return; // other ! commands (voice, etc.)
+
+    // Rate limiting
+    const now = Date.now();
+    const lastMsg = this.lastMessageTime.get(message.author.id) ?? 0;
+    if (now - lastMsg < RATE_LIMIT_MS) {
+      return; // silently ignore
+    }
+    this.lastMessageTime.set(message.author.id, now);
 
     let content = message.content.trim();
 

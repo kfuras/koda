@@ -479,6 +479,66 @@ async function runDreamCycle(bot: KodaBot): Promise<void> {
   }
 }
 
+// --- Daily digest ---
+
+async function sendDailyDigest(agent: KodaAgent, bot: KodaBot): Promise<void> {
+  const date = today();
+  console.log(`[digest] Generating daily digest for ${date}`);
+
+  agent.send(
+    `[DAILY DIGEST] Summarize what you did today (${date}). Check:\n` +
+    `- data/autonomous-logs/${date}.log for task results\n` +
+    `- data/.task-results/${date}.json for success/failure counts\n` +
+    `- data/observations.md for observations recorded today\n` +
+    `- data/.agent-initiatives.json for proposed tasks\n\n` +
+    `Format as a concise evening report. Include: tasks completed, tasks failed, ` +
+    `observations recorded, content drafted, and anything that needs attention tomorrow.\n` +
+    `Keep it under 1500 characters.`,
+    async (responseText) => {
+      await bot.sendProactive(`**[Daily Digest — ${date}]**\n\n${responseText}`);
+    },
+  );
+}
+
+// --- Auto-backup ---
+
+async function autoBackup(): Promise<void> {
+  console.log("[backup] Auto-committing agent data...");
+
+  try {
+    // Stage observation/learnings/task data
+    await execFileAsync("git", [
+      "add",
+      "data/observations.md",
+      "data/observations-archive.md",
+      "data/LEARNINGS.md",
+      "data/.task-results/",
+      "data/outcomes/",
+      "data/autonomous-logs/",
+      "data/daily-logs/",
+    ], { cwd: CONTENT_HUB_DIR });
+
+    // Check if there's anything to commit
+    const { stdout: status } = await execFileAsync("git", ["status", "--porcelain"], {
+      cwd: CONTENT_HUB_DIR,
+    });
+
+    if (!status.trim()) {
+      console.log("[backup] Nothing to commit");
+      return;
+    }
+
+    await execFileAsync("git", [
+      "commit", "-m", `ci: auto-backup agent data ${today()}`,
+    ], { cwd: CONTENT_HUB_DIR });
+
+    console.log("[backup] Committed");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[backup] Failed:", msg);
+  }
+}
+
 // --- Scheduler ---
 
 export function startScheduler(agent: KodaAgent, bot: KodaBot): void {
@@ -493,13 +553,23 @@ export function startScheduler(agent: KodaAgent, bot: KodaBot): void {
     console.log(`  ${name}: ${task.cron}`);
   }
 
-  // Dream cycle — 3:07 AM daily (matching old daemon)
-  cron.schedule("7 3 * * *", () => {
-    void runDreamCycle(bot);
+  // Daily digest — 21:00 every evening
+  cron.schedule("0 21 * * *", () => {
+    void sendDailyDigest(agent, bot);
   }, {
     timezone: "Europe/Oslo",
   });
-  console.log(`  dream_cycle: 7 3 * * *`);
+  console.log(`  daily_digest: 0 21 * * *`);
+
+  // Dream cycle — 3:07 AM daily (matching old daemon)
+  cron.schedule("7 3 * * *", () => {
+    void runDreamCycle(bot);
+    // Auto-backup after dream cycle consolidation
+    setTimeout(() => void autoBackup(), 60_000);
+  }, {
+    timezone: "Europe/Oslo",
+  });
+  console.log(`  dream_cycle + auto_backup: 7 3 * * *`);
 
   // Outcome checks — every 6 hours
   cron.schedule("0 */6 * * *", () => {
