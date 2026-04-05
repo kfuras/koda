@@ -83,10 +83,14 @@ export const DAILY_BUDGET_USD = CONFIG.agent.daily_budget_usd ?? parseFloat(proc
 // --- System prompt (loaded from files, no hardcoded personal data) ---
 
 import { loadManifests, validateManifests, generateToolContext } from "./manifests.js";
+import { loadSkills, generateSkillContext } from "./skills.js";
 
 const manifests = loadManifests();
 validateManifests(manifests);
 const toolContext = generateToolContext(manifests);
+
+const skills = loadSkills();
+const skillContext = generateSkillContext(skills);
 
 // Load soul.md for inline prompt context
 let soulSummary = "";
@@ -139,4 +143,6 @@ You are a persistent, autonomous agent — not a one-shot chatbot. You should:
 - For complex multi-step tasks, use ultraplan() to create a structured plan BEFORE executing. Send the plan for approval. Only execute after approval. Use the researcher/implementer/verifier subagents for each phase.
 
 ${toolContext}
+
+${skillContext}
 `;
