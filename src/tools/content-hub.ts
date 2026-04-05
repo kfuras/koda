@@ -52,7 +52,7 @@ async function runSafe(
 const postTweet = tool(
   "post_tweet",
   "Post a tweet to X. Returns the tweet URL. NEVER call without user approval.",
-  { text: z.string().max(280), image_path: z.string().optional() },
+  { text: z.string().max(25000), image_path: z.string().optional() },
   async ({ text, image_path }) => {
     const args = [text];
     if (image_path) args.push(image_path);
@@ -117,7 +117,7 @@ const quoteTweet = tool(
   "Post a quote tweet via browser automation. NEVER call without user approval.",
   {
     url: z.string().url(),
-    text: z.string().max(280),
+    text: z.string().max(25000),
     dry_run: z.boolean().default(false),
   },
   async ({ url, text, dry_run }) => {
