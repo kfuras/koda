@@ -1,0 +1,15 @@
+{
+  "name": "gmail",
+  "description": "Gmail and Google Calendar API — read/send emails, manage calendar events",
+  "command": "$GMAIL_MCP_PYTHON",
+  "args": ["$GMAIL_MCP_PATH"],
+  "defaults": {
+    "GMAIL_MCP_PYTHON": "/Users/YOUR_USERNAME/code/gmail-mcp/.venv/bin/python",
+    "GMAIL_MCP_PATH": "/Users/YOUR_USERNAME/code/gmail-mcp/server.py"
+  },
+  "env_required": [],
+  "notes": [
+    "OAuth credentials at ~/code/gmail-mcp/credentials/",
+    "Local repo with its own venv"
+  ]
+}

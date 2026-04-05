@@ -1,0 +1,35 @@
+{
+  "name": "x-mcp",
+  "description": "X (Twitter) API tools — post tweets, get timeline, delete tweets, generate images",
+  "command": "python3",
+  "args": ["$CONTENT_HUB_DIR/servers/x_mcp_server.py"],
+  "env_required": ["X_CONSUMER_KEY", "X_CONSUMER_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"],
+  "env_optional": ["GEMINI_API_KEY"],
+  "env_file": "$CONTENT_HUB_DIR/.env",
+  "tools": [
+    {
+      "name": "post_tweet",
+      "description": "Post a tweet with optional image/video via X API v2 + tweepy. Supports .jpg/.png/.gif/.mp4.",
+      "risk": "high",
+      "usage": "post_tweet(text='...', image_path='/path/to/media.mp4')"
+    },
+    {
+      "name": "get_my_tweets",
+      "description": "Get your recent tweets with metrics. Max 100.",
+      "risk": "low",
+      "usage": "get_my_tweets(count=10)"
+    },
+    {
+      "name": "delete_tweet",
+      "description": "Delete a tweet by ID.",
+      "risk": "high",
+      "usage": "delete_tweet(tweet_id='123456789')"
+    },
+    {
+      "name": "generate_image",
+      "description": "Generate an image using Google Gemini API.",
+      "risk": "low",
+      "usage": "generate_image(prompt='...', aspect_ratio='16:9')"
+    }
+  ]
+}

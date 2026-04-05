@@ -8,7 +8,6 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { SYSTEM_PROMPT, AGENT_DEFAULTS, CONTENT_HUB_DIR, TASK_LIMITS, DEFAULT_TASK_LIMITS } from "./config.js";
-import { contentHubServer } from "./tools/content-hub.js";
 import { agentToolsServer } from "./tools/agent-tools.js";
 import { gscServer } from "./tools/gsc.js";
 
@@ -134,7 +133,6 @@ function loadExternalMcpServers(): Record<string, { command: string; args: strin
 function getMcpServers() {
   return {
     // Built-in SDK servers (TypeScript, compiled in)
-    "content-hub": contentHubServer,
     "agent-tools": agentToolsServer,
     gsc: gscServer,
     // External servers (loaded from mcp-servers.json)

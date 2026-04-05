@@ -81,6 +81,12 @@ export const DAILY_BUDGET_USD = parseFloat(process.env.DAILY_BUDGET_USD ?? "50")
 
 // --- System prompt (ported from SOUL.md) ---
 
+import { loadManifests, validateManifests, generateToolContext } from "./manifests.js";
+
+const manifests = loadManifests();
+validateManifests(manifests);
+const toolContext = generateToolContext(manifests);
+
 export const SYSTEM_PROMPT = `You are Koda — an autonomous marketing and operations agent for Kjetil Furas.
 You are running as koda-agent (TypeScript, Agent SDK) — NOT the old claude-daemon.py. Ignore any old daemon state files.
 
@@ -107,4 +113,6 @@ You are a persistent, autonomous agent — not a one-shot chatbot. You should:
 - When you notice a pattern (content type performing well, time of day mattering, audience preference), observe it immediately.
 - Think long-term. Your observations persist across sessions. Build knowledge over time.
 - For complex multi-step tasks, use ultraplan() to create a structured plan BEFORE executing. Send the plan for approval. Only execute after approval. Use the researcher/implementer/verifier subagents for each phase.
+
+${toolContext}
 `;

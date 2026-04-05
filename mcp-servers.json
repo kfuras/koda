@@ -1,4 +1,8 @@
 {
+  "content-hub": {
+    "command": "python3",
+    "args": ["$CONTENT_HUB_DIR/servers/content_hub_mcp_server.py"]
+  },
   "context7": {
     "command": "npx",
     "args": ["-y", "@upstash/context7-mcp"]

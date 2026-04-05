@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { type KodaAgent } from "./agent.js";
 import { type KodaBot } from "./bot.js";
 import { CONTENT_HUB_DIR, TICK_INTERVAL_MS, DAILY_BUDGET_USD } from "./config.js";
+import { observeTaskResult } from "./runtime.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -745,6 +746,9 @@ async function executeTask(
       await bot.sendToChannel(`**[${name}]**\n\n${result.text}`);
     }
 
+    // Auto-observe result (runtime behavior, not a tool call)
+    await observeTaskResult(name, true, result.cost, result.turns, result.text);
+
     // Chain: run next task with output as context
     if (task.chain && TASKS[task.chain]) {
       const nextTask = TASKS[task.chain];
@@ -761,6 +765,9 @@ async function executeTask(
       timestamp: timestamp(),
     });
     await logToFile(name, `FAILED ($${result.cost.toFixed(2)}, ${result.turns}t) — ${result.text.slice(0, 200)}`);
+
+    // Auto-observe failure
+    await observeTaskResult(name, false, result.cost, result.turns, result.text);
 
     // Retry with backoff
     if (retryCount < MAX_TASK_RETRIES) {

@@ -1,0 +1,11 @@
+{
+  "name": "context7",
+  "description": "Live framework and library documentation — fetches current docs for any library, SDK, or API",
+  "command": "npx",
+  "args": ["-y", "@upstash/context7-mcp"],
+  "env_required": [],
+  "notes": [
+    "Use for looking up current API syntax, configuration, version-specific docs",
+    "Prefer over web search for library documentation"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "airtable",
+  "description": "Airtable API — create/read/update/delete records, manage tables and fields",
+  "command": "$AIRTABLE_MCP_COMMAND",
+  "args": [],
+  "defaults": {
+    "AIRTABLE_MCP_COMMAND": "/Users/YOUR_USERNAME/code/n8n-assistant/scripts/run-airtable-mcp.sh"
+  },
+  "env_required": ["AIRTABLE_API_KEY"],
+  "notes": [
+    "Skool members base: appIxRJJ7JhlJ5tht, table: tblsEH6vkHtcT1d47",
+    "Wrapper script loads env vars from ~/.secrets.zsh"
+  ]
+}

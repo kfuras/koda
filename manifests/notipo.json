@@ -1,0 +1,28 @@
+{
+  "name": "notipo",
+  "description": "Notipo API — publish blog posts from content to WordPress via notipo.com",
+  "type": "cli",
+  "command": "npx",
+  "args": ["notipo"],
+  "env_required": ["NOTIPO_API_KEY", "NOTIPO_URL"],
+  "env_file": "$CONTENT_HUB_DIR/.env",
+  "notes": [
+    "Notipo syncs Notion pages to WordPress — but the CLI can also create posts directly",
+    "NOTIPO_URL must be https://notipo.com",
+    "NOTIPO_API_KEY is in ~/.secrets.zsh and content-hub/.env",
+    "CLI usage: npx notipo posts create --title 'Title' --body 'markdown content' --publish --wait",
+    "CLI usage: npx notipo posts list --limit 5",
+    "CLI usage: npx notipo jobs (check sync job status)",
+    "Website: notipo.com — Kjetil's SaaS product, needs marketing"
+  ],
+  "api": {
+    "base_url": "https://notipo.com/api",
+    "auth_header": "x-api-key",
+    "endpoints": [
+      "GET /api/posts — list posts",
+      "POST /api/posts — create a post (title, body, slug, publish)",
+      "GET /api/categories — list categories",
+      "GET /api/jobs — check sync job status"
+    ]
+  }
+}
