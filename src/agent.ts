@@ -286,6 +286,29 @@ export class KodaAgent {
         this.currentCallback(`Agent stream error: ${errorMsg}`, true);
         this.currentCallback = null;
       }
+
+      // Auto-restart the agent session
+      if (this.running) {
+        console.log("[agent] Auto-restarting in 5 seconds...");
+        await new Promise((r) => setTimeout(r, 5000));
+        if (this.running) {
+          try {
+            this.abortController = new AbortController();
+            await this.start();
+            console.log("[agent] Auto-restart successful");
+          } catch (restartErr) {
+            console.error("[agent] Auto-restart failed:", restartErr);
+            // Retry again in 30 seconds
+            setTimeout(() => {
+              if (this.running) {
+                console.log("[agent] Retrying auto-restart...");
+                this.abortController = new AbortController();
+                this.start().catch((e) => console.error("[agent] Retry failed:", e));
+              }
+            }, 30_000);
+          }
+        }
+      }
     }
   }
 }
