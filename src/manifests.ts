@@ -5,8 +5,10 @@
 
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
+import { homedir } from "node:os";
 
-const MANIFESTS_DIR = resolve(import.meta.dirname ?? ".", "..", "manifests");
+const KODA_HOME = process.env.KODA_HOME ?? resolve(homedir(), ".koda");
+const MANIFESTS_DIR = resolve(KODA_HOME, "manifests");
 
 export interface ToolManifest {
   name: string;

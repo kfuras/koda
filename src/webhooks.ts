@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHmac } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { WEBHOOK_PORT, WEBHOOK_SECRET, CONTENT_HUB_DIR, DAILY_BUDGET_USD } from "./config.js";
+import { WEBHOOK_PORT, WEBHOOK_SECRET, KODA_HOME, DAILY_BUDGET_USD } from "./config.js";
 import { type KodaAgent } from "./agent.js";
 import { type KodaBot } from "./bot.js";
 
@@ -47,7 +47,7 @@ export function startWebhookServer(agent: KodaAgent, bot: KodaBot): void {
       const date = new Date().toISOString().slice(0, 10);
       let taskResults: Record<string, { status: string }> = {};
       try {
-        const data = await readFile(`${CONTENT_HUB_DIR}/data/.task-results/${date}.json`, "utf-8");
+        const data = await readFile(`${KODA_HOME}/data/.task-results/${date}.json`, "utf-8");
         taskResults = JSON.parse(data);
       } catch { /* no results yet */ }
 

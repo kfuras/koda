@@ -1,7 +1,7 @@
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { writeFile, readFile, mkdir } from "node:fs/promises";
-import { CONTENT_HUB_DIR } from "../config.js";
+import { KODA_HOME } from "../config.js";
 
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }] };
@@ -13,13 +13,12 @@ function today(): string {
 
 // --- Observation system ---
 
-const OBS_FILE = `${CONTENT_HUB_DIR}/data/observations.md`;
+const OBS_FILE = `${KODA_HOME}/data/observations.md`;
 
 const observe = tool(
   "observe",
-  "Record an observation for memory consolidation. Use this whenever you notice " +
-  "something worth remembering: a pattern, a preference, a fact, a result. " +
-  "The dream cycle will consolidate these into LEARNINGS.md over time. " +
+  "Record an observation for memory consolidation. NOTE: observations are now recorded " +
+  "automatically after tasks — only use this for ad-hoc observations during conversations. " +
   "Types: rule (permanent), preference (how user likes things), fact (learned info), " +
   "context (temporary situation), goal (objective), habit (recurring pattern), event (one-time).",
   {
@@ -61,7 +60,7 @@ const observe = tool(
 
 // --- Self-initiated task queue ---
 
-const INITIATIVE_FILE = `${CONTENT_HUB_DIR}/data/.agent-initiatives.json`;
+const INITIATIVE_FILE = `${KODA_HOME}/data/.agent-initiatives.json`;
 
 interface Initiative {
   id: string;
@@ -82,7 +81,7 @@ async function loadInitiatives(): Promise<Initiative[]> {
 }
 
 async function saveInitiatives(items: Initiative[]): Promise<void> {
-  await mkdir(`${CONTENT_HUB_DIR}/data`, { recursive: true });
+  await mkdir(`${KODA_HOME}/data`, { recursive: true });
   await writeFile(INITIATIVE_FILE, JSON.stringify(items, null, 2));
 }
 
@@ -126,7 +125,7 @@ const proposeTask = tool(
 
 // --- Outcome tracking ---
 
-const OUTCOMES_DIR = `${CONTENT_HUB_DIR}/data/outcomes`;
+const OUTCOMES_DIR = `${KODA_HOME}/data/outcomes`;
 
 const trackOutcome = tool(
   "track_outcome",
@@ -170,7 +169,7 @@ const trackOutcome = tool(
 
 // --- ULTRAPLAN ---
 
-const PLANS_DIR = `${CONTENT_HUB_DIR}/data/plans`;
+const PLANS_DIR = `${KODA_HOME}/data/plans`;
 
 const ultraplan = tool(
   "ultraplan",

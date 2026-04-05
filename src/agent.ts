@@ -7,7 +7,7 @@ import type {
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { SYSTEM_PROMPT, AGENT_DEFAULTS, CONTENT_HUB_DIR, TASK_LIMITS, DEFAULT_TASK_LIMITS } from "./config.js";
+import { SYSTEM_PROMPT, AGENT_DEFAULTS, CONTENT_HUB_DIR, KODA_HOME, TASK_LIMITS, DEFAULT_TASK_LIMITS } from "./config.js";
 import { agentToolsServer } from "./tools/agent-tools.js";
 import { gscServer } from "./tools/gsc.js";
 
@@ -22,7 +22,7 @@ interface PendingMessage {
 
 // --- Session persistence ---
 
-const SESSION_FILE = resolve(CONTENT_HUB_DIR, "data/.koda-session-id");
+const SESSION_FILE = resolve(KODA_HOME, "data/.koda-session-id");
 
 async function loadSessionId(): Promise<string | undefined> {
   try {
@@ -89,7 +89,7 @@ function classifyRisk(toolName: string): "LOW" | "MEDIUM" | "HIGH" {
 
 // --- MCP config: built-in SDK servers + external from mcp-servers.json ---
 
-const MCP_SERVERS_FILE = resolve(import.meta.dirname ?? ".", "..", "mcp-servers.json");
+const MCP_SERVERS_FILE = resolve(KODA_HOME, "mcp-servers.json");
 
 interface ExternalMcpDef {
   command: string;

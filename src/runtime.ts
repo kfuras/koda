@@ -4,7 +4,7 @@
  */
 
 import { writeFile, readFile, mkdir } from "node:fs/promises";
-import { CONTENT_HUB_DIR } from "./config.js";
+import { KODA_HOME } from "./config.js";
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -12,7 +12,7 @@ function today(): string {
 
 // --- Auto-observe after task completion ---
 
-const OBS_FILE = `${CONTENT_HUB_DIR}/data/observations.md`;
+const OBS_FILE = `${KODA_HOME}/data/observations.md`;
 
 export async function autoObserve(
   type: "rule" | "preference" | "fact" | "context" | "goal" | "habit" | "event",
@@ -40,7 +40,7 @@ export async function autoObserve(
 
 // --- Auto-track outcome after publishing ---
 
-const OUTCOMES_DIR = `${CONTENT_HUB_DIR}/data/outcomes`;
+const OUTCOMES_DIR = `${KODA_HOME}/data/outcomes`;
 
 export async function autoTrackOutcome(
   contentType: "tweet" | "video" | "skool_post" | "bluesky_post" | "article" | "blog_post",

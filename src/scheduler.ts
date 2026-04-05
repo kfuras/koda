@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { type KodaAgent } from "./agent.js";
 import { type KodaBot } from "./bot.js";
-import { CONTENT_HUB_DIR, TICK_INTERVAL_MS, DAILY_BUDGET_USD } from "./config.js";
+import { CONTENT_HUB_DIR, KODA_HOME, TICK_INTERVAL_MS, DAILY_BUDGET_USD } from "./config.js";
 import { observeTaskResult } from "./runtime.js";
 
 const execFileAsync = promisify(execFile);
@@ -27,7 +27,7 @@ interface TaskResult {
 }
 
 const MAX_HEAL_ATTEMPTS = 2;
-const RESULTS_DIR = `${CONTENT_HUB_DIR}/data/.task-results`;
+const RESULTS_DIR = `${KODA_HOME}/data/.task-results`;
 
 // --- Daily cost tracking ---
 
@@ -84,7 +84,7 @@ const TASKS: Record<string, TaskDef> = {
     prompt:
       "Pull Instagram analytics for @kjetilfuras. " +
       "Use the instagram_analytics tool with save=true. " +
-      "Log follower count + top performing recent posts to data/autonomous-logs/{date}.log. " +
+      "Log follower count + top performing recent posts to ~/.koda/data/autonomous-logs/{date}.log. " +
       "If any Reel got notable engagement (>50 plays or >5 likes), report it.",
     cron: "15 7 * * *",
     type: "silent",
@@ -96,7 +96,7 @@ const TASKS: Record<string, TaskDef> = {
       "Check likes, reposts, reply counts. Log stats to data/analytics/{date}.json alongside YouTube data. " +
       "If any post did notably well or poorly, report it. " +
       "Then check the Bluesky timeline (get-timeline, limit 20) for trending AI/automation/Claude topics. " +
-      "Log findings to data/autonomous-logs/{date}.log. Only report if highly relevant. " +
+      "Log findings to ~/.koda/data/autonomous-logs/{date}.log. Only report if highly relevant. " +
       "IMPORTANT: If you get a rate limit error from Bluesky, skip it gracefully and log 'Bluesky rate limited' — do not retry.",
     cron: "30 7 * * *",
     type: "silent",
@@ -112,7 +112,7 @@ const TASKS: Record<string, TaskDef> = {
     prompt:
       "SKOOL MEMBER SYNC: Use the skool_airtable_sync tool. " +
       "Parse the JSON output. If there are new members, churned members, upgrades, or downgrades, " +
-      "report a summary. If no changes, log silently to data/autonomous-logs/{date}.log. " +
+      "report a summary. If no changes, log silently to ~/.koda/data/autonomous-logs/{date}.log. " +
       "If the tool fails (e.g. Skool login issue, Airtable error), report the error.",
     cron: "0 8 * * *",
     type: "silent",
@@ -120,7 +120,7 @@ const TASKS: Record<string, TaskDef> = {
   goal_check: {
     prompt:
       "GOAL CHECK: Read GOALS.md. Check current YouTube sub count and recent view counts. " +
-      "Identify which goal has the biggest gap. Log the assessment to data/autonomous-logs/{date}.log. " +
+      "Identify which goal has the biggest gap. Log the assessment to ~/.koda/data/autonomous-logs/{date}.log. " +
       "If a goal is significantly behind, include a brief note about what action could help " +
       "(but don't take action without approval).",
     cron: "15 8 * * *",
@@ -256,7 +256,7 @@ const TASKS: Record<string, TaskDef> = {
     prompt:
       "META TOKEN CHECK: Run: python3 scripts/refresh_meta_token.py --check " +
       "If it exits with code 1 (token expiring soon), run without --check to refresh. " +
-      "Log result to data/autonomous-logs/{date}.log. " +
+      "Log result to ~/.koda/data/autonomous-logs/{date}.log. " +
       "If refresh fails, report that the Meta token needs manual renewal.",
     cron: "0 8 * * 0",
     type: "silent",
@@ -268,7 +268,7 @@ const TASKS: Record<string, TaskDef> = {
       "(get_my_tweets, 5 most recent) and compare against real_examples in the profile. " +
       "If there are new posts to analyze, fetch and read them, then update data/voice-profile.json. " +
       "Keep existing structure — only add/update, don't remove working patterns. " +
-      "Log what changed to data/autonomous-logs/{date}.log.",
+      "Log what changed to ~/.koda/data/autonomous-logs/{date}.log.",
     cron: "0 9 * * 6",
     type: "silent",
   },
@@ -293,7 +293,7 @@ const TASKS: Record<string, TaskDef> = {
   conversation_memory: {
     prompt:
       "CONVERSATION MEMORY: Extract and persist key decisions from recent conversations. " +
-      "Step 1: Read data/autonomous-logs/{date}.log and the last few task results. " +
+      "Step 1: Read ~/.koda/data/autonomous-logs/{date}.log and the last few task results. " +
       "Step 2: Identify key DECISIONS, PREFERENCES, and FACTS learned today that would be " +
       "useful in future sessions (e.g., 'user prefers X over Y', 'tool Z needs config A'). " +
       "Step 3: Read LEARNINGS.md. Only add items that are NOT already there. " +
@@ -349,7 +349,7 @@ function today(): string {
 }
 
 async function logToFile(taskName: string, text: string): Promise<void> {
-  const dir = `${CONTENT_HUB_DIR}/data/autonomous-logs`;
+  const dir = `${KODA_HOME}/data/autonomous-logs`;
   await mkdir(dir, { recursive: true });
   const line = `[${new Date().toISOString()}] [${taskName}] ${text}\n`;
   await writeFile(`${dir}/${today()}.log`, line, { flag: "a" });
@@ -366,7 +366,7 @@ Your job is to diagnose the root cause, fix the broken script/config, and re-run
 You have full bash and MCP tool access.
 Read the relevant source files to understand what went wrong.
 Make minimal, targeted fixes — don't rewrite entire scripts.
-Log what you fixed to data/daily-logs/{date}.md.
+Log what you fixed to ~/.koda/data/daily-logs/{date}.md.
 After fixing files, commit your changes to git with a descriptive message (prefix with 'fix:').
 If you can't fix it autonomously (needs human action like logging into a website),
 explain exactly what the user needs to do.`;
@@ -432,7 +432,7 @@ async function selfHeal(
 // --- Outcome checker ---
 
 async function checkOutcomes(agent: KodaAgent): Promise<void> {
-  const dir = `${CONTENT_HUB_DIR}/data/outcomes`;
+  const dir = `${KODA_HOME}/data/outcomes`;
   const now = new Date();
 
   try {
@@ -475,7 +475,7 @@ async function checkOutcomes(agent: KodaAgent): Promise<void> {
 // --- Initiative review ---
 
 async function reviewInitiatives(agent: KodaAgent, bot: KodaBot): Promise<void> {
-  const file = `${CONTENT_HUB_DIR}/data/.agent-initiatives.json`;
+  const file = `${KODA_HOME}/data/.agent-initiatives.json`;
   try {
     const data = JSON.parse(await readFile(file, "utf-8"));
     const pending = data.filter((i: { status: string; priority: string }) =>
@@ -495,7 +495,7 @@ async function reviewInitiatives(agent: KodaAgent, bot: KodaBot): Promise<void> 
 
 // --- Heartbeat ---
 
-const HEARTBEAT_FILE = `${CONTENT_HUB_DIR}/data/.koda-heartbeat`;
+const HEARTBEAT_FILE = `${KODA_HOME}/data/.koda-heartbeat`;
 
 function startHeartbeat(): NodeJS.Timeout {
   const beat = async () => {
@@ -587,10 +587,10 @@ async function sendDailyDigest(agent: KodaAgent, bot: KodaBot): Promise<void> {
 
   agent.send(
     `[DAILY DIGEST] Summarize what you did today (${date}). Check:\n` +
-    `- data/autonomous-logs/${date}.log for task results\n` +
-    `- data/.task-results/${date}.json for success/failure counts\n` +
-    `- data/observations.md for observations recorded today\n` +
-    `- data/.agent-initiatives.json for proposed tasks\n\n` +
+    `- ~/.koda/data/autonomous-logs/${date}.log for task results\n` +
+    `- ~/.koda/data/.task-results/${date}.json for success/failure counts\n` +
+    `- ~/.koda/data/observations.md for observations recorded today\n` +
+    `- ~/.koda/data/.agent-initiatives.json for proposed tasks\n\n` +
     `Today's API spend: $${dailyCostUsd.toFixed(2)} / $${DAILY_BUDGET_USD} daily budget.\n\n` +
     `Format as a concise evening report. Include: tasks completed, tasks failed, ` +
     `observations recorded, content drafted, API spend, and anything that needs attention tomorrow.\n` +
@@ -607,17 +607,13 @@ async function autoBackup(): Promise<void> {
   console.log("[backup] Auto-committing agent data...");
 
   try {
-    // Stage observation/learnings/task data (ignore missing paths)
+    // Stage content-hub data (drafts, analytics, brand voice)
     await execFileAsync("git", [
       "add", "--ignore-errors",
-      "data/observations.md",
-      "data/observations-archive.md",
-      "data/LEARNINGS.md",
-      "data/.task-results/",
-      "data/outcomes/",
-      "data/autonomous-logs/",
-      "data/daily-logs/",
-      "data/plans/",
+      "data/drafts/",
+      "data/analytics/",
+      "data/brand-voice-skill.md",
+      "data/x-feed/",
     ], { cwd: CONTENT_HUB_DIR }).catch(() => {});
 
     // Check if there's anything to commit
