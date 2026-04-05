@@ -1,28 +1,98 @@
 {
   "name": "notipo",
-  "description": "Notipo API — publish blog posts from content to WordPress via notipo.com",
-  "type": "cli",
-  "command": "npx",
-  "args": ["notipo"],
+  "description": "Notipo — publish blog posts to WordPress. Creates a Notion page, triggers the publishing pipeline, syncs to WordPress automatically.",
+  "type": "cli-and-api",
   "env_required": ["NOTIPO_API_KEY", "NOTIPO_URL"],
   "env_file": "$CONTENT_HUB_DIR/.env",
   "notes": [
-    "Notipo syncs Notion pages to WordPress — but the CLI can also create posts directly",
     "NOTIPO_URL must be https://notipo.com",
     "NOTIPO_API_KEY is in ~/.secrets.zsh and content-hub/.env",
-    "CLI usage: npx notipo posts create --title 'Title' --body 'markdown content' --publish --wait",
-    "CLI usage: npx notipo posts list --limit 5",
-    "CLI usage: npx notipo jobs (check sync job status)",
-    "Website: notipo.com — Kjetil's SaaS product, needs marketing"
+    "Website: notipo.com — Kjetil's SaaS product",
+    "Pro features: image generation, sync-now (15s cooldown)",
+    "All responses wrapped in { data: ... } on success, { message: '...' } on error"
   ],
-  "api": {
-    "base_url": "https://notipo.com/api",
-    "auth_header": "x-api-key",
-    "endpoints": [
-      "GET /api/posts — list posts",
-      "POST /api/posts — create a post (title, body, slug, publish)",
-      "GET /api/categories — list categories",
-      "GET /api/jobs — check sync job status"
+  "cli": {
+    "command": "npx notipo",
+    "usage": [
+      "npx notipo posts create --title 'Title' --body 'markdown content' --publish --wait",
+      "npx notipo posts list --limit 5",
+      "npx notipo jobs"
     ]
+  },
+  "api": {
+    "base_url": "https://notipo.com",
+    "auth": {
+      "header": "X-API-Key",
+      "value": "$NOTIPO_API_KEY"
+    },
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/posts/create",
+        "description": "Create a blog post — creates Notion page and triggers publishing pipeline",
+        "body": {
+          "title": "string (required) — post title",
+          "body": "string (optional) — markdown content with headings and images",
+          "category": "string (optional) — existing WordPress category name",
+          "tags": "string[] (optional) — tag names array",
+          "seoKeyword": "string (optional) — focus keyword for SEO plugins",
+          "imageTitle": "string (optional) — featured image text overlay (Pro)",
+          "slug": "string (optional) — custom URL slug",
+          "publish": "boolean (optional) — publish immediately, default false",
+          "images": "object[] (optional) — Unsplash images with query and afterHeading (Pro)"
+        },
+        "response": "{ data: { jobId, notionPageId } }"
+      },
+      {
+        "method": "POST",
+        "path": "/api/sync-now",
+        "description": "Trigger immediate Notion poll (Pro only, 15s cooldown)"
+      },
+      {
+        "method": "GET",
+        "path": "/api/posts",
+        "description": "List all posts with status and sync history"
+      },
+      {
+        "method": "GET",
+        "path": "/api/posts/:id",
+        "description": "Get single post details"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/posts/:id",
+        "description": "Delete post and clean up WordPress media"
+      },
+      {
+        "method": "GET",
+        "path": "/api/jobs",
+        "description": "List sync and publish jobs. Statuses: PENDING, RUNNING, COMPLETED, FAILED"
+      },
+      {
+        "method": "GET",
+        "path": "/api/settings",
+        "description": "Get Notion and WordPress connection status"
+      },
+      {
+        "method": "GET",
+        "path": "/api/categories",
+        "description": "List WordPress categories"
+      },
+      {
+        "method": "GET",
+        "path": "/api/tags",
+        "description": "List WordPress tags"
+      },
+      {
+        "method": "GET",
+        "path": "/api/billing",
+        "description": "View plan, usage, and trial info"
+      }
+    ],
+    "example": {
+      "create_post": "curl -X POST https://notipo.com/api/posts/create -H 'X-API-Key: $NOTIPO_API_KEY' -H 'Content-Type: application/json' -d '{\"title\": \"My Post\", \"body\": \"# Hello\\nContent here\", \"publish\": true}'",
+      "check_job": "curl https://notipo.com/api/jobs -H 'X-API-Key: $NOTIPO_API_KEY'",
+      "list_posts": "curl https://notipo.com/api/posts -H 'X-API-Key: $NOTIPO_API_KEY'"
+    }
   }
 }
