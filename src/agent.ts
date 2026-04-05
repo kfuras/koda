@@ -83,6 +83,19 @@ const MEDIUM_RISK_TOOLS = new Set([
   "mcp__airtable__delete_records",
 ]);
 
+/** Redact secrets from log output — passwords, tokens, API keys, base64 auth. */
+function redactSecrets(text: string): string {
+  return text
+    // API keys, tokens, passwords in curl headers/flags
+    .replace(/(Bearer\s+|x-api-key:\s*|Authorization:\s*Basic\s+|password['":\s]+)([^\s"',}{]+)/gi, "$1[REDACTED]")
+    // Env var values that look like secrets
+    .replace(/([A-Z_]*(KEY|TOKEN|SECRET|PASSWORD|PASS)[A-Z_]*["':\s=]+)([^\s"',}{]+)/gi, "$1[REDACTED]")
+    // Base64 encoded credentials (user:pass pattern)
+    .replace(/echo\s+-n\s+"[^"]*"\s*\|\s*base64/g, "echo -n [REDACTED] | base64")
+    // WordPress app passwords (xxxx xxxx xxxx pattern)
+    .replace(/\b[A-Za-z0-9]{4}\s[A-Za-z0-9]{4}\s[A-Za-z0-9]{4}\s[A-Za-z0-9]{4}\s[A-Za-z0-9]{4}\s[A-Za-z0-9]{4}\b/g, "[REDACTED]");
+}
+
 function classifyRisk(toolName: string): "LOW" | "MEDIUM" | "HIGH" {
   if (HIGH_RISK_TOOLS.has(toolName)) return "HIGH";
   if (MEDIUM_RISK_TOOLS.has(toolName)) return "MEDIUM";
@@ -517,7 +530,8 @@ export class KodaAgent {
               const toolBlock = block as { type: string; name?: string; input?: unknown };
               const risk = classifyRisk(toolBlock.name ?? "unknown");
               if (risk === "HIGH") {
-                console.log(`[yolo] HIGH RISK: ${toolBlock.name} — ${JSON.stringify(toolBlock.input).slice(0, 200)}`);
+                const redacted = redactSecrets(JSON.stringify(toolBlock.input).slice(0, 200));
+                console.log(`[yolo] HIGH RISK: ${toolBlock.name} — ${redacted}`);
               }
               // Mutual exclusion: detect if main agent wrote to memory files
               if (toolBlock.name === "Write" || toolBlock.name === "Edit") {
