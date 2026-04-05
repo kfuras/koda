@@ -87,9 +87,48 @@ function classifyRisk(toolName: string): "LOW" | "MEDIUM" | "HIGH" {
   return "LOW";
 }
 
+// --- Shared MCP config ---
+
+function getMcpServers() {
+  return {
+    "content-hub": contentHubServer,
+    "agent-tools": agentToolsServer,
+    gsc: gscServer,
+    context7: {
+      command: "npx",
+      args: ["-y", "@upstash/context7-mcp"],
+    },
+    youtube: {
+      command: "youtube-studio-mcp",
+      args: [],
+    },
+    "x-mcp": {
+      command: process.env.X_MCP_COMMAND ?? "python3",
+      args: [process.env.X_MCP_PATH ?? `${CONTENT_HUB_DIR}/servers/x_mcp_server.py`],
+    },
+    "bluesky-mcp": {
+      command: "npx",
+      args: ["-y", "@semihberkay/bluesky-mcp"],
+      env: {
+        BLUESKY_IDENTIFIER: process.env.BLUESKY_HANDLE ?? "kjetilfuras.bsky.social",
+        BLUESKY_PASSWORD: process.env.BLUESKY_APP_PASSWORD ?? "",
+      },
+    },
+    gmail: {
+      command: process.env.GMAIL_MCP_PYTHON ?? "/Users/YOUR_USERNAME/code/gmail-mcp/.venv/bin/python",
+      args: [process.env.GMAIL_MCP_PATH ?? "/Users/YOUR_USERNAME/code/gmail-mcp/server.py"],
+    },
+    airtable: {
+      command: process.env.AIRTABLE_MCP_COMMAND ?? "/Users/YOUR_USERNAME/code/n8n-assistant/scripts/run-airtable-mcp.sh",
+      args: [],
+    },
+  };
+}
+
 // --- Persistent Agent ---
 
 export class KodaAgent {
+  private turnsSinceCompact = 0;
   private queryInstance: Query | null = null;
   private abortController = new AbortController();
   private messageQueue = new MessageQueue();
@@ -135,39 +174,7 @@ export class KodaAgent {
         cwd: CONTENT_HUB_DIR,
         settingSources: ["project"],
         ...(this.sessionId ? { resume: this.sessionId } : {}),
-        mcpServers: {
-          "content-hub": contentHubServer,
-          "agent-tools": agentToolsServer,
-          gsc: gscServer,
-          context7: {
-            command: "npx",
-            args: ["-y", "@upstash/context7-mcp"],
-          },
-          youtube: {
-            command: "youtube-studio-mcp",
-            args: [],
-          },
-          "x-mcp": {
-            command: process.env.X_MCP_COMMAND ?? "python3",
-            args: [process.env.X_MCP_PATH ?? `${CONTENT_HUB_DIR}/servers/x_mcp_server.py`],
-          },
-          "bluesky-mcp": {
-            command: "npx",
-            args: ["-y", "@semihberkay/bluesky-mcp"],
-            env: {
-              BLUESKY_IDENTIFIER: process.env.BLUESKY_HANDLE ?? "kjetilfuras.bsky.social",
-              BLUESKY_PASSWORD: process.env.BLUESKY_APP_PASSWORD ?? "",
-            },
-          },
-          gmail: {
-            command: process.env.GMAIL_MCP_PYTHON ?? "/Users/YOUR_USERNAME/code/gmail-mcp/.venv/bin/python",
-            args: [process.env.GMAIL_MCP_PATH ?? "/Users/YOUR_USERNAME/code/gmail-mcp/server.py"],
-          },
-          airtable: {
-            command: process.env.AIRTABLE_MCP_COMMAND ?? "/Users/YOUR_USERNAME/code/n8n-assistant/scripts/run-airtable-mcp.sh",
-            args: [],
-          },
-        },
+        mcpServers: getMcpServers(),
       },
     });
 
@@ -224,39 +231,7 @@ export class KodaAgent {
         allowDangerouslySkipPermissions: true,
         cwd: CONTENT_HUB_DIR,
         settingSources: ["project"],
-        mcpServers: {
-          "content-hub": contentHubServer,
-          "agent-tools": agentToolsServer,
-          gsc: gscServer,
-          context7: {
-            command: "npx",
-            args: ["-y", "@upstash/context7-mcp"],
-          },
-          youtube: {
-            command: "youtube-studio-mcp",
-            args: [],
-          },
-          "x-mcp": {
-            command: process.env.X_MCP_COMMAND ?? "python3",
-            args: [process.env.X_MCP_PATH ?? `${CONTENT_HUB_DIR}/servers/x_mcp_server.py`],
-          },
-          "bluesky-mcp": {
-            command: "npx",
-            args: ["-y", "@semihberkay/bluesky-mcp"],
-            env: {
-              BLUESKY_IDENTIFIER: process.env.BLUESKY_HANDLE ?? "kjetilfuras.bsky.social",
-              BLUESKY_PASSWORD: process.env.BLUESKY_APP_PASSWORD ?? "",
-            },
-          },
-          gmail: {
-            command: process.env.GMAIL_MCP_PYTHON ?? "/Users/YOUR_USERNAME/code/gmail-mcp/.venv/bin/python",
-            args: [process.env.GMAIL_MCP_PATH ?? "/Users/YOUR_USERNAME/code/gmail-mcp/server.py"],
-          },
-          airtable: {
-            command: process.env.AIRTABLE_MCP_COMMAND ?? "/Users/YOUR_USERNAME/code/n8n-assistant/scripts/run-airtable-mcp.sh",
-            args: [],
-          },
-        },
+        mcpServers: getMcpServers(),
       },
     });
 
@@ -379,9 +354,27 @@ export class KodaAgent {
           }
 
           currentText = "";
+          this.turnsSinceCompact += result.num_turns ?? 1;
           console.log(
-            `[agent] Turn complete (${result.num_turns} turns, $${result.total_cost_usd.toFixed(2)})`,
+            `[agent] Turn complete (${result.num_turns} turns, $${result.total_cost_usd.toFixed(2)}, ${this.turnsSinceCompact} since compact)`,
           );
+
+          // Proactive context compaction every 50 turns
+          if (result.subtype === "success" && this.turnsSinceCompact >= 50) {
+            console.log("[agent] Proactive compaction — context getting large");
+            this.turnsSinceCompact = 0;
+            this.messageQueue.push({
+              userMessage: {
+                type: "user",
+                session_id: this.sessionId ?? "",
+                message: { role: "user", content: "/compact" },
+                parent_tool_use_id: null,
+              },
+              onResponse: () => {
+                console.log("[agent] Compaction complete");
+              },
+            });
+          }
 
           // Auto-recover from max_turns or other fatal errors
           if (result.subtype !== "success") {

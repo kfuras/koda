@@ -15,6 +15,8 @@ interface TaskDef {
   cron: string;
   type: "silent" | "approval";
   timeout?: number;
+  /** Chain: run this task after successful completion, passing output as context */
+  chain?: string;
 }
 
 interface TaskResult {
@@ -30,6 +32,10 @@ const RESULTS_DIR = `${CONTENT_HUB_DIR}/data/.task-results`;
 
 let dailyCostUsd = 0;
 let dailyCostDate = today();
+
+export function getDailyCost(): { cost: number; date: string; budget: number } {
+  return { cost: dailyCostUsd, date: dailyCostDate, budget: DAILY_BUDGET_USD };
+}
 
 function trackCost(cost: number): boolean {
   const now = today();
@@ -282,6 +288,20 @@ const TASKS: Record<string, TaskDef> = {
     cron: "0 11 * * 1",
     type: "silent",
     timeout: 600,
+  },
+  conversation_memory: {
+    prompt:
+      "CONVERSATION MEMORY: Extract and persist key decisions from recent conversations. " +
+      "Step 1: Read data/autonomous-logs/{date}.log and the last few task results. " +
+      "Step 2: Identify key DECISIONS, PREFERENCES, and FACTS learned today that would be " +
+      "useful in future sessions (e.g., 'user prefers X over Y', 'tool Z needs config A'). " +
+      "Step 3: Read LEARNINGS.md. Only add items that are NOT already there. " +
+      "Step 4: If there are new learnings, append them to the appropriate section in LEARNINGS.md. " +
+      "Step 5: If LEARNINGS.md is over 100 lines, consolidate older entries. " +
+      "Keep it concise. Only save things that help future sessions — not task logs.",
+    cron: "0 20 * * *",
+    type: "silent",
+    timeout: 300,
   },
   lesson_draft: {
     prompt:
@@ -723,6 +743,15 @@ async function executeTask(
       await bot.sendApproval(name, result.text);
     } else if (result.text.length > 10) {
       await bot.sendToChannel(`**[${name}]**\n\n${result.text}`);
+    }
+
+    // Chain: run next task with output as context
+    if (task.chain && TASKS[task.chain]) {
+      const nextTask = TASKS[task.chain];
+      const chainPrompt = `${nextTask.prompt}\n\n[CONTEXT FROM ${name}]:\n${result.text.slice(0, 3000)}`;
+      console.log(`[chain] ${name} → ${task.chain}`);
+      await logToFile(name, `CHAIN → ${task.chain}`);
+      void executeTask(task.chain, { ...nextTask, prompt: chainPrompt }, agent, bot);
     }
   } else {
     // Failed

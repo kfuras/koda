@@ -1,8 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHmac } from "node:crypto";
-import { WEBHOOK_PORT, WEBHOOK_SECRET } from "./config.js";
+import { readFile } from "node:fs/promises";
+import { WEBHOOK_PORT, WEBHOOK_SECRET, CONTENT_HUB_DIR, DAILY_BUDGET_USD } from "./config.js";
 import { type KodaAgent } from "./agent.js";
 import { type KodaBot } from "./bot.js";
+
+const startTime = Date.now();
 
 function verifySignature(payload: string, signature: string): boolean {
   if (!WEBHOOK_SECRET) return true; // No secret = no verification
@@ -33,6 +36,40 @@ interface GitHubEvent {
 
 export function startWebhookServer(agent: KodaAgent, bot: KodaBot): void {
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    // Health endpoint
+    if (req.method === "GET" && req.url === "/health") {
+      const { getDailyCost } = await import("./scheduler.js");
+      const cost = getDailyCost();
+      const uptimeMs = Date.now() - startTime;
+      const uptimeH = (uptimeMs / 3600000).toFixed(1);
+
+      // Load today's task results
+      const date = new Date().toISOString().slice(0, 10);
+      let taskResults: Record<string, { status: string }> = {};
+      try {
+        const data = await readFile(`${CONTENT_HUB_DIR}/data/.task-results/${date}.json`, "utf-8");
+        taskResults = JSON.parse(data);
+      } catch { /* no results yet */ }
+
+      const ok = Object.values(taskResults).filter(r => r.status === "ok").length;
+      const failed = Object.values(taskResults).filter(r => r.status === "failed").length;
+
+      const health = {
+        status: "running",
+        uptime_hours: parseFloat(uptimeH),
+        pid: process.pid,
+        daily_cost_usd: parseFloat(cost.cost.toFixed(2)),
+        daily_budget_usd: cost.budget,
+        budget_remaining_usd: parseFloat((cost.budget - cost.cost).toFixed(2)),
+        tasks_today: { ok, failed, total: Object.keys(taskResults).length },
+        memory_mb: parseFloat((process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1)),
+      };
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(health, null, 2));
+      return;
+    }
+
     if (req.method !== "POST" || req.url !== "/webhook/github") {
       res.writeHead(404);
       res.end();

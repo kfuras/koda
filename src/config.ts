@@ -66,6 +66,7 @@ export const TASK_LIMITS: Record<string, { maxTurns: number; maxBudgetUsd: numbe
   social_post: { maxTurns: 15, maxBudgetUsd: 5 },
   brand_voice_learn: { maxTurns: 15, maxBudgetUsd: 5 },
   voice_profile_refresh: { maxTurns: 10, maxBudgetUsd: 3 },
+  conversation_memory: { maxTurns: 10, maxBudgetUsd: 3 },
   // Heavy tasks (articles, blog posts, lessons)
   content_proposal: { maxTurns: 20, maxBudgetUsd: 8 },
   skool_post: { maxTurns: 20, maxBudgetUsd: 8 },
