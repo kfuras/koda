@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { type KodaAgent } from "./agent.js";
 import { type KodaBot } from "./bot.js";
-import { CONTENT_HUB_DIR, KODA_HOME, TICK_INTERVAL_MS, DAILY_BUDGET_USD, CONFIG } from "./config.js";
+import { KODA_HOME, TICK_INTERVAL_MS, DAILY_BUDGET_USD, CONFIG } from "./config.js";
 import { observeTaskResult } from "./runtime.js";
 
 const execFileAsync = promisify(execFile);
@@ -557,9 +557,9 @@ async function runDreamCycle(bot: KodaBot): Promise<void> {
   try {
     const { stdout, stderr } = await execFileAsync(
       "/bin/bash",
-      [`${CONTENT_HUB_DIR}/scripts/dream-cycle.sh`],
+      [`${KODA_HOME}/scripts/dream-cycle.sh`],
       {
-        cwd: CONTENT_HUB_DIR,
+        cwd: KODA_HOME,
         timeout: 60_000,
       },
     );
@@ -604,33 +604,20 @@ async function sendDailyDigest(agent: KodaAgent, bot: KodaBot): Promise<void> {
 // --- Auto-backup ---
 
 async function autoBackup(): Promise<void> {
-  console.log("[backup] Auto-committing agent data...");
+  console.log("[backup] Backing up agent data...");
 
   try {
-    // Stage content-hub data (drafts, analytics, brand voice)
-    await execFileAsync("git", [
-      "add", "--ignore-errors",
-      "data/drafts/",
-      "data/analytics/",
-      "data/brand-voice-skill.md",
-      "data/x-feed/",
-    ], { cwd: CONTENT_HUB_DIR }).catch(() => {});
+    // Rsync ~/.koda/data to a timestamped backup
+    const backupDir = `${KODA_HOME}/backups`;
+    const stamp = today();
+    await execFileAsync("mkdir", ["-p", backupDir]);
+    await execFileAsync("rsync", [
+      "-a", "--delete",
+      `${KODA_HOME}/data/`,
+      `${backupDir}/${stamp}/`,
+    ]);
 
-    // Check if there's anything to commit
-    const { stdout: status } = await execFileAsync("git", ["status", "--porcelain"], {
-      cwd: CONTENT_HUB_DIR,
-    });
-
-    if (!status.trim()) {
-      console.log("[backup] Nothing to commit");
-      return;
-    }
-
-    await execFileAsync("git", [
-      "commit", "-m", `ci: auto-backup agent data ${today()}`,
-    ], { cwd: CONTENT_HUB_DIR });
-
-    console.log("[backup] Committed");
+    console.log(`[backup] Synced to ${backupDir}/${stamp}/`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[backup] Failed:", msg);
