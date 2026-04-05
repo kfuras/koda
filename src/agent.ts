@@ -1,9 +1,10 @@
-import { query, type Query } from "@anthropic-ai/claude-agent-sdk";
-import type {
-  SDKResultMessage,
-  SDKUserMessage,
-  SDKAssistantMessage,
-} from "@anthropic-ai/claude-agent-sdk/entrypoints/sdk/coreTypes.js";
+import {
+  query,
+  type Query,
+  type SDKResultMessage,
+  type SDKUserMessage,
+  type SDKAssistantMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
