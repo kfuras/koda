@@ -133,6 +133,7 @@ export class KodaBot {
         GatewayIntentBits.GuildMessageReactions,
         GatewayIntentBits.GuildVoiceStates,
       ],
+      partials: [2, 3], // Partials.Message = 2, Partials.Reaction = 3
     });
 
     this.setupHandlers();
@@ -438,16 +439,35 @@ export class KodaBot {
   }
 
   private async handleReaction(
-    reaction: { emoji: { name: string | null }; message: { id: string; fetch: () => Promise<Message> } },
+    reaction: { partial?: boolean; emoji: { name: string | null }; message: { partial?: boolean; id: string; content?: string | null; fetch: () => Promise<Message> } },
     user: { bot: boolean },
   ): Promise<void> {
     if (user.bot) return;
 
-    const taskName = this.approvalMessages.get(reaction.message.id);
-    if (!taskName) return;
+    // Fetch partial reaction/message if needed (for reactions on older messages)
+    try {
+      if (reaction.partial) await (reaction as unknown as { fetch: () => Promise<unknown> }).fetch();
+      if (reaction.message.partial) await reaction.message.fetch();
+    } catch {
+      return;
+    }
 
     const emoji = reaction.emoji.name;
     if (emoji !== "✅" && emoji !== "❌") return;
+
+    // Check in-memory map first
+    let taskName = this.approvalMessages.get(reaction.message.id);
+
+    // If not in map (e.g., after restart), check message content for [APPROVAL NEEDED]
+    if (!taskName) {
+      const content = reaction.message.content ?? "";
+      const match = content.match(/\*\*\[APPROVAL NEEDED\]\*\*\s*(\S+)/);
+      if (match) {
+        taskName = match[1];
+      } else {
+        return;
+      }
+    }
 
     this.approvalMessages.delete(reaction.message.id);
 
