@@ -439,15 +439,15 @@ function startTickLoop(agent: KodaAgent, bot: KodaBot): NodeJS.Timeout {
     if (hour < 7 || hour > 23) return;
 
     const tickPrompt =
-      `[TICK] Autonomous check-in. User is ${userIdle ? "IDLE/OFFLINE" : "ACTIVE"}.` +
+      `[TICK] Quick check-in. User is ${userIdle ? "IDLE/OFFLINE" : "ACTIVE"}.` +
       ` Date: ${date}, time: ${new Date().toTimeString().slice(0, 5)}.` +
-      `\n\nEvaluate:` +
-      `\n1. Any pending initiatives in data/.agent-initiatives.json that are approved but not done?` +
-      `\n2. Any observations you should act on?` +
-      `\n3. Any goals in GOALS.md falling behind that need attention?` +
-      `\n4. Any outcome checks due (content posted > 24h ago)?` +
-      `\n\nAutonomy level: ${userIdle ? "HIGH — you may execute low and medium priority tasks without approval. Still ask for high priority." : "NORMAL — propose tasks, wait for approval on medium/high priority."}` +
-      `\n\nIf nothing needs attention, respond with just "tick ok" and nothing else. Do NOT read files unless you have a specific reason to.`;
+      `\n\nThis is a LIGHTWEIGHT check. Do NOT execute tasks. Do NOT read files unless critical.` +
+      `\n\nQuickly assess from memory:` +
+      `\n1. Any approved initiatives you haven't started yet?` +
+      `\n2. Anything urgent that needs immediate attention?` +
+      `\n\nIf something needs doing, use propose_task() to queue it — do NOT do it now.` +
+      `\nIf nothing needs attention, respond with just "tick ok".` +
+      `\nKeep this under 3 tool calls.`;
 
     agent.send(tickPrompt, async (responseText) => {
       // Only send to proactive channel if the agent actually did something
