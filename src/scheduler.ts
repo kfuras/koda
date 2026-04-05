@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { type KodaAgent } from "./agent.js";
 import { type KodaBot } from "./bot.js";
-import { CONTENT_HUB_DIR, TICK_INTERVAL_MS } from "./config.js";
+import { CONTENT_HUB_DIR, TICK_INTERVAL_MS, DAILY_BUDGET_USD } from "./config.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -25,6 +25,25 @@ interface TaskResult {
 
 const MAX_HEAL_ATTEMPTS = 2;
 const RESULTS_DIR = `${CONTENT_HUB_DIR}/data/.task-results`;
+
+// --- Daily cost tracking ---
+
+let dailyCostUsd = 0;
+let dailyCostDate = today();
+
+function trackCost(cost: number): boolean {
+  const now = today();
+  if (now !== dailyCostDate) {
+    dailyCostUsd = 0;
+    dailyCostDate = now;
+  }
+  dailyCostUsd += cost;
+  if (dailyCostUsd > DAILY_BUDGET_USD) {
+    console.log(`[budget] Daily budget exceeded: $${dailyCostUsd.toFixed(2)} > $${DAILY_BUDGET_USD}`);
+    return false; // over budget
+  }
+  return true; // within budget
+}
 
 // --- Task definitions ---
 
@@ -551,8 +570,9 @@ async function sendDailyDigest(agent: KodaAgent, bot: KodaBot): Promise<void> {
     `- data/.task-results/${date}.json for success/failure counts\n` +
     `- data/observations.md for observations recorded today\n` +
     `- data/.agent-initiatives.json for proposed tasks\n\n` +
+    `Today's API spend: $${dailyCostUsd.toFixed(2)} / $${DAILY_BUDGET_USD} daily budget.\n\n` +
     `Format as a concise evening report. Include: tasks completed, tasks failed, ` +
-    `observations recorded, content drafted, and anything that needs attention tomorrow.\n` +
+    `observations recorded, content drafted, API spend, and anything that needs attention tomorrow.\n` +
     `Keep it under 1500 characters.`,
     async (responseText) => {
       await bot.sendProactive(`**[Daily Digest — ${date}]**\n\n${responseText}`);
@@ -657,11 +677,15 @@ export function startScheduler(agent: KodaAgent, bot: KodaBot): void {
   console.log(`  tick_loop: every ${TICK_INTERVAL_MS / 1000}s`);
 }
 
+const MAX_TASK_RETRIES = 2;
+const RETRY_DELAY_MS = 5 * 60 * 1000; // 5 minutes
+
 async function executeTask(
   name: string,
   task: TaskDef,
   agent: KodaAgent,
   bot: KodaBot,
+  retryCount = 0,
 ): Promise<void> {
   const date = today();
 
@@ -672,33 +696,55 @@ async function executeTask(
     return;
   }
 
-  console.log(`[${date}] Running task: ${name}`);
+  // Check daily budget
+  if (!trackCost(0)) {
+    console.log(`[${date}] Skipping ${name} — daily budget exceeded ($${dailyCostUsd.toFixed(2)})`);
+    await logToFile(name, `SKIPPED — daily budget exceeded ($${dailyCostUsd.toFixed(2)}/$${DAILY_BUDGET_USD})`);
+    return;
+  }
+
+  console.log(`[${date}] Running task: ${name} (isolated, attempt ${retryCount + 1}/${MAX_TASK_RETRIES + 1})`);
 
   const fullPrompt =
     `[SCHEDULED TASK: ${name}] ${task.prompt}\n\nToday's date: ${date}`;
 
-  agent.send(fullPrompt, async (responseText, isError) => {
-    if (!isError) {
-      // Success
-      await saveResult(date, name, { status: "ok", timestamp: timestamp() });
-      await logToFile(name, `OK — ${responseText.slice(0, 200)}`);
+  // Run in isolated session — separate context, per-task turn/budget limits
+  const result = await agent.runIsolatedTask(name, fullPrompt);
 
-      if (task.type === "approval") {
-        await bot.sendApproval(name, responseText);
-      } else if (responseText.length > 10) {
-        await bot.sendToChannel(`**[${name}]**\n\n${responseText}`);
-      }
-    } else {
-      // Failed — attempt self-heal
-      await saveResult(date, name, {
-        status: "failed",
-        error: responseText.slice(0, 2000),
-        timestamp: timestamp(),
-      });
-      await logToFile(name, `FAILED — ${responseText.slice(0, 200)}`);
-      console.log(`[${name}] Failed, attempting self-heal...`);
+  // Track cost
+  trackCost(result.cost);
 
-      await selfHeal(name, task, responseText, agent, bot);
+  if (!result.isError) {
+    // Success
+    await saveResult(date, name, { status: "ok", timestamp: timestamp() });
+    await logToFile(name, `OK ($${result.cost.toFixed(2)}, ${result.turns}t) — ${result.text.slice(0, 200)}`);
+
+    if (task.type === "approval") {
+      await bot.sendApproval(name, result.text);
+    } else if (result.text.length > 10) {
+      await bot.sendToChannel(`**[${name}]**\n\n${result.text}`);
     }
-  });
+  } else {
+    // Failed
+    await saveResult(date, name, {
+      status: "failed",
+      error: result.text.slice(0, 2000),
+      timestamp: timestamp(),
+    });
+    await logToFile(name, `FAILED ($${result.cost.toFixed(2)}, ${result.turns}t) — ${result.text.slice(0, 200)}`);
+
+    // Retry with backoff
+    if (retryCount < MAX_TASK_RETRIES) {
+      const delayMs = RETRY_DELAY_MS * (retryCount + 1); // 5min, 10min
+      console.log(`[${name}] Retrying in ${delayMs / 60000} minutes...`);
+      await logToFile(name, `RETRY scheduled in ${delayMs / 60000}min`);
+      setTimeout(() => {
+        void executeTask(name, task, agent, bot, retryCount + 1);
+      }, delayMs);
+    } else {
+      // All retries exhausted — try self-heal as last resort
+      console.log(`[${name}] All retries exhausted, attempting self-heal...`);
+      await selfHeal(name, task, result.text, agent, bot);
+    }
+  }
 }

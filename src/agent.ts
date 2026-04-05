@@ -6,7 +6,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk/entrypoints/sdk/coreTypes.js";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { SYSTEM_PROMPT, AGENT_DEFAULTS, CONTENT_HUB_DIR } from "./config.js";
+import { SYSTEM_PROMPT, AGENT_DEFAULTS, CONTENT_HUB_DIR, TASK_LIMITS, DEFAULT_TASK_LIMITS } from "./config.js";
 import { contentHubServer } from "./tools/content-hub.js";
 import { agentToolsServer } from "./tools/agent-tools.js";
 import { gscServer } from "./tools/gsc.js";
@@ -196,6 +196,111 @@ export class KodaAgent {
   async stop(): Promise<void> {
     this.running = false;
     this.abortController.abort();
+  }
+
+  /**
+   * Run a task in an isolated session — separate from the persistent conversation.
+   * Gets its own turn limit, budget cap, and fresh context.
+   * Returns { text, cost, turns, isError }.
+   */
+  async runIsolatedTask(
+    taskName: string,
+    prompt: string,
+  ): Promise<{ text: string; cost: number; turns: number; isError: boolean }> {
+    const limits = TASK_LIMITS[taskName] ?? DEFAULT_TASK_LIMITS;
+    const controller = new AbortController();
+
+    // Create a one-shot prompt (no streaming input)
+    const taskQuery = query({
+      prompt: prompt,
+      options: {
+        abortController: controller,
+        systemPrompt: SYSTEM_PROMPT,
+        tools: { type: "preset", preset: "claude_code" },
+        model: AGENT_DEFAULTS.model,
+        maxTurns: limits.maxTurns,
+        maxBudgetUsd: limits.maxBudgetUsd,
+        permissionMode: "bypassPermissions",
+        allowDangerouslySkipPermissions: true,
+        cwd: CONTENT_HUB_DIR,
+        settingSources: ["project"],
+        mcpServers: {
+          "content-hub": contentHubServer,
+          "agent-tools": agentToolsServer,
+          gsc: gscServer,
+          context7: {
+            command: "npx",
+            args: ["-y", "@upstash/context7-mcp"],
+          },
+          youtube: {
+            command: "youtube-studio-mcp",
+            args: [],
+          },
+          "x-mcp": {
+            command: process.env.X_MCP_COMMAND ?? "python3",
+            args: [process.env.X_MCP_PATH ?? `${CONTENT_HUB_DIR}/servers/x_mcp_server.py`],
+          },
+          "bluesky-mcp": {
+            command: "npx",
+            args: ["-y", "@semihberkay/bluesky-mcp"],
+            env: {
+              BLUESKY_IDENTIFIER: process.env.BLUESKY_HANDLE ?? "kjetilfuras.bsky.social",
+              BLUESKY_PASSWORD: process.env.BLUESKY_APP_PASSWORD ?? "",
+            },
+          },
+          gmail: {
+            command: process.env.GMAIL_MCP_PYTHON ?? "/Users/YOUR_USERNAME/code/gmail-mcp/.venv/bin/python",
+            args: [process.env.GMAIL_MCP_PATH ?? "/Users/YOUR_USERNAME/code/gmail-mcp/server.py"],
+          },
+          airtable: {
+            command: process.env.AIRTABLE_MCP_COMMAND ?? "/Users/YOUR_USERNAME/code/n8n-assistant/scripts/run-airtable-mcp.sh",
+            args: [],
+          },
+        },
+      },
+    });
+
+    let resultText = "";
+    let totalCost = 0;
+    let totalTurns = 0;
+    let isError = false;
+
+    try {
+      for await (const message of taskQuery) {
+        if (message.type === "result") {
+          const result = message as SDKResultMessage;
+          totalCost = result.total_cost_usd ?? 0;
+          totalTurns = result.num_turns ?? 0;
+          isError = result.subtype !== "success";
+
+          if (result.subtype === "success") {
+            resultText = (result as unknown as { result: string }).result || resultText;
+          } else {
+            const errors = (result as unknown as { errors?: string[] }).errors;
+            resultText = `Task error (${result.subtype}): ${errors?.join(", ") ?? "unknown"}`;
+          }
+        } else if (message.type === "assistant") {
+          const assistantMsg = message as SDKAssistantMessage;
+          const textBlocks = (assistantMsg.message?.content ?? []).filter(
+            (b: { type: string }) => b.type === "text",
+          );
+          if (textBlocks.length > 0) {
+            resultText = textBlocks
+              .map((b: { type: string; text?: string }) => b.text ?? "")
+              .join("\n");
+          }
+        }
+      }
+    } catch (err) {
+      resultText = `Task crashed: ${err instanceof Error ? err.message : String(err)}`;
+      isError = true;
+    }
+
+    console.log(
+      `[task:${taskName}] ${isError ? "FAILED" : "OK"} (${totalTurns} turns, $${totalCost.toFixed(2)}, limit: ${limits.maxTurns}t/$${limits.maxBudgetUsd})`,
+    );
+
+    return { text: resultText, cost: totalCost, turns: totalTurns, isError };
   }
 
   private async *createInputStream(): AsyncGenerator<SDKUserMessage> {
