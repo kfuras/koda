@@ -579,7 +579,7 @@ export class KodaAgent {
 
           currentText = "";
           currentUserMessage = "";
-          this.turnsSinceCompact += result.num_turns ?? 1;
+          this.turnsSinceCompact += 1;
           console.log(
             `[agent] Turn complete (${result.num_turns} turns, $${result.total_cost_usd.toFixed(2)}, ${this.turnsSinceCompact} since compact)`,
           );
