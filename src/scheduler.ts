@@ -517,9 +517,9 @@ async function autoBackup(): Promise<void> {
   console.log("[backup] Auto-committing agent data...");
 
   try {
-    // Stage observation/learnings/task data
+    // Stage observation/learnings/task data (ignore missing paths)
     await execFileAsync("git", [
-      "add",
+      "add", "--ignore-errors",
       "data/observations.md",
       "data/observations-archive.md",
       "data/LEARNINGS.md",
@@ -527,7 +527,8 @@ async function autoBackup(): Promise<void> {
       "data/outcomes/",
       "data/autonomous-logs/",
       "data/daily-logs/",
-    ], { cwd: CONTENT_HUB_DIR });
+      "data/plans/",
+    ], { cwd: CONTENT_HUB_DIR }).catch(() => {});
 
     // Check if there's anything to commit
     const { stdout: status } = await execFileAsync("git", ["status", "--porcelain"], {
