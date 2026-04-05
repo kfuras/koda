@@ -20,9 +20,31 @@ import {
   CONTENT_HUB_DIR,
 } from "./config.js";
 import { type KodaAgent } from "./agent.js";
+import { teleportSave } from "./teleport.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const THREAD_THRESHOLD = 2000; // Create thread if response exceeds this
+
+// --- Token budget inline syntax ---
+// Parses "+500k", "+2M", "use 1M tokens" from message start/end.
+// Returns { cleanText, tokenBudget } where tokenBudget is the parsed number or undefined.
+
+const TOKEN_BUDGET_PATTERN = /(?:^|\s)\+(\d+(?:\.\d+)?)\s*([kmb])\b/i;
+const TOKEN_BUDGET_VERBOSE = /\buse\s+(\d+(?:\.\d+)?)\s*([kmb])\s*(?:tokens?)?\b/i;
+
+function parseTokenBudget(text: string): { cleanText: string; tokenBudget: number | undefined } {
+  const match = text.match(TOKEN_BUDGET_PATTERN) ?? text.match(TOKEN_BUDGET_VERBOSE);
+  if (!match) return { cleanText: text, tokenBudget: undefined };
+
+  const value = parseFloat(match[1]);
+  const unit = match[2].toLowerCase();
+  const multiplier = unit === "k" ? 1_000 : unit === "m" ? 1_000_000 : 1_000_000_000;
+  const tokenBudget = Math.round(value * multiplier);
+
+  // Strip the budget syntax from the message
+  const cleanText = text.replace(match[0], "").trim();
+  return { cleanText, tokenBudget };
+}
 
 // --- Frustration detection ---
 
@@ -246,6 +268,25 @@ export class KodaBot {
     await message.reply({ content: status, allowedMentions: { repliedUser: false } });
   }
 
+  private async handleTeleport(message: Message): Promise<void> {
+    const summary = message.content.replace(/^!teleport\s*/i, "").trim() || "Current conversation context";
+
+    // Ask the agent to summarize its current context
+    this.agent.send(
+      `[TELEPORT REQUEST] Summarize your current working context for transfer to Claude Code CLI. ` +
+      `Include: what you're working on, key decisions made, files involved, and next steps. ` +
+      `Be thorough but concise — this will be loaded into a fresh CLI session.\n` +
+      `User note: ${summary}`,
+      async (responseText) => {
+        const path = await teleportSave(undefined, summary, responseText);
+        await message.reply({
+          content: `Context saved to \`${path}\`.\nIn Claude Code CLI, run: \`read ~/.koda/data/teleport.json\``,
+          allowedMentions: { repliedUser: false },
+        });
+      },
+    );
+  }
+
   private setupHandlers(): void {
     this.client.once("ready", () => {
       console.log(`Discord bot logged in as ${this.client.user?.tag}`);
@@ -280,6 +321,10 @@ export class KodaBot {
       await this.sendStatus(message);
       return;
     }
+    if (trimmed === "!teleport" || trimmed.startsWith("!teleport ")) {
+      await this.handleTeleport(message);
+      return;
+    }
     if (trimmed.startsWith("!")) return; // other ! commands (voice, etc.)
 
     // Rate limiting
@@ -309,12 +354,23 @@ export class KodaBot {
     }, 5_000);
     await channel.sendTyping().catch(() => {});
 
+    // Token budget parsing
+    const { cleanText: budgetCleanText, tokenBudget } = parseTokenBudget(content);
+    content = budgetCleanText;
+
     // Frustration detection
     const frustrated = detectFrustration(content);
 
     // Build message with username context
     const username = message.author.displayName || message.author.username;
     const promptParts: string[] = [];
+
+    if (tokenBudget) {
+      promptParts.push(
+        `[SYSTEM: User requested extended token budget: ${tokenBudget.toLocaleString()} tokens. ` +
+        `Take more time and be more thorough in your response. Do deep research if needed.]`,
+      );
+    }
 
     if (frustrated) {
       promptParts.push(

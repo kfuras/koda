@@ -8,6 +8,8 @@ import { type KodaAgent } from "./agent.js";
 import { type KodaBot } from "./bot.js";
 import { KODA_HOME, TICK_INTERVAL_MS, DAILY_BUDGET_USD, CONFIG } from "./config.js";
 import { observeTaskResult } from "./runtime.js";
+import { stateFileQueue, taskCircuitBreaker, sessionRegistry } from "./patterns.js";
+import { runDreamCycle } from "./dream.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -43,7 +45,16 @@ function loadTasks(): Record<string, TaskDef> {
   }
 }
 
-const TASKS = loadTasks();
+let TASKS = loadTasks();
+
+/** Hot-reload tasks from disk. Called by file watcher. */
+export function reloadTasks(): void {
+  TASKS = loadTasks();
+}
+
+export function getTasks(): Record<string, TaskDef> {
+  return TASKS;
+}
 
 // --- Daily cost tracking ---
 
@@ -87,13 +98,15 @@ async function saveResult(
   taskId: string,
   result: TaskResult,
 ): Promise<void> {
-  const results = await loadResults(date);
-  results[taskId] = result;
-  await mkdir(RESULTS_DIR, { recursive: true });
-  await writeFile(
-    `${RESULTS_DIR}/${date}.json`,
-    JSON.stringify(results, null, 2),
-  );
+  await stateFileQueue.run(async () => {
+    const results = await loadResults(date);
+    results[taskId] = result;
+    await mkdir(RESULTS_DIR, { recursive: true });
+    await writeFile(
+      `${RESULTS_DIR}/${date}.json`,
+      JSON.stringify(results, null, 2),
+    );
+  });
 }
 
 // --- Helpers ---
@@ -293,33 +306,8 @@ function startTickLoop(agent: KodaAgent, bot: KodaBot) {
 }
 
 // --- Dream cycle ---
-
-async function runDreamCycle(bot: KodaBot): Promise<void> {
-  console.log("[dream] Starting dream cycle...");
-
-  try {
-    const { stdout, stderr } = await execFileAsync(
-      "/bin/bash",
-      [`${KODA_HOME}/scripts/dream-cycle.sh`],
-      {
-        cwd: KODA_HOME,
-        timeout: 60_000,
-      },
-    );
-
-    const output = stdout || stderr || "No output";
-    console.log(`[dream] ${output}`);
-    await logToFile("dream_cycle", output);
-
-    if (output.includes("Promoted") || output.includes("Archived")) {
-      await bot.sendToChannel(`**[dream_cycle]**\n\n${output}`);
-    }
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error("[dream] Failed:", errorMsg);
-    await logToFile("dream_cycle", `FAILED: ${errorMsg}`);
-  }
-}
+// Now handled by src/dream.ts (LLM-driven 4-phase consolidation).
+// The old dream-cycle.sh (bash+python) is kept at ~/.koda/scripts/ as a fallback.
 
 // --- Daily digest ---
 
@@ -365,6 +353,53 @@ async function autoBackup(): Promise<void> {
   }
 }
 
+// --- Missed task detection ---
+
+async function detectMissedTasks(
+  tasks: Record<string, TaskDef>,
+  agent: KodaAgent,
+  bot: KodaBot,
+): Promise<void> {
+  const date = today();
+  const results = await loadResults(date);
+  const now = new Date();
+  let missed = 0;
+
+  for (const [name, task] of Object.entries(tasks)) {
+    // Skip if already ran today
+    if (results[name]?.status === "ok" || results[name]?.status === "healed") continue;
+
+    // Parse cron to see if it should have fired today before now
+    try {
+      // node-cron doesn't expose "next run" directly, so we check if the cron
+      // pattern includes a specific hour and that hour has passed
+      const parts = task.cron.split(/\s+/);
+      if (parts.length >= 2) {
+        const minute = parseInt(parts[0], 10);
+        const hour = parseInt(parts[1], 10);
+        if (!isNaN(hour) && !isNaN(minute)) {
+          const scheduledTime = new Date(now);
+          scheduledTime.setHours(hour, minute, 0, 0);
+          // If the scheduled time already passed today and task hasn't run
+          if (scheduledTime < now) {
+            missed++;
+            console.log(`[missed] ${name} was scheduled for ${hour}:${String(minute).padStart(2, "0")} but hasn't run — executing now`);
+            await logToFile(name, `MISSED — executing on startup recovery`);
+            void executeTask(name, task, agent, bot);
+          }
+        }
+      }
+    } catch {
+      // Can't parse cron — skip
+    }
+  }
+
+  if (missed > 0) {
+    console.log(`[missed] Recovered ${missed} missed task(s)`);
+    await bot.sendToChannel(`**[startup]** Recovered ${missed} missed task(s) from downtime.`);
+  }
+}
+
 // --- Task execution ---
 
 const MAX_TASK_RETRIES = 2;
@@ -379,6 +414,20 @@ async function executeTask(
 ): Promise<void> {
   const date = today();
 
+  // Circuit breaker — skip if tripped
+  if (taskCircuitBreaker.isOpen(name)) {
+    const status = taskCircuitBreaker.status(name);
+    console.log(`[${name}] Circuit OPEN — skipping (${Math.round(status.cooldownRemaining / 60_000)}min cooldown remaining)`);
+    await logToFile(name, `CIRCUIT OPEN — skipped (${status.failures} consecutive failures)`);
+    return;
+  }
+
+  // Session registry — prevent duplicate execution
+  if (await sessionRegistry.isRunning(name)) {
+    console.log(`[${name}] Already running — skipping duplicate`);
+    return;
+  }
+
   const results = await loadResults(date);
   if (results[name]?.status === "ok" || results[name]?.status === "healed") {
     console.log(`[${date}] Skipping ${name} — already completed today`);
@@ -391,6 +440,9 @@ async function executeTask(
     return;
   }
 
+  // Register session
+  const sessionPath = await sessionRegistry.register(name);
+
   console.log(`[${date}] Running task: ${name} (isolated, attempt ${retryCount + 1}/${MAX_TASK_RETRIES + 1})`);
 
   const fullPrompt =
@@ -401,6 +453,8 @@ async function executeTask(
   trackCost(result.cost);
 
   if (!result.isError) {
+    taskCircuitBreaker.recordSuccess(name);
+    await sessionRegistry.complete(sessionPath, "completed");
     await saveResult(date, name, { status: "ok", timestamp: timestamp() });
     await logToFile(name, `OK ($${result.cost.toFixed(2)}, ${result.turns}t) — ${result.text.slice(0, 200)}`);
 
@@ -420,6 +474,8 @@ async function executeTask(
       void executeTask(task.chain, { ...nextTask, prompt: chainPrompt }, agent, bot);
     }
   } else {
+    const tripped = taskCircuitBreaker.recordFailure(name);
+    await sessionRegistry.complete(sessionPath, "failed");
     await saveResult(date, name, {
       status: "failed",
       error: result.text.slice(0, 2000),
@@ -429,7 +485,11 @@ async function executeTask(
 
     await observeTaskResult(name, false, result.cost, result.turns, result.text);
 
-    if (retryCount < MAX_TASK_RETRIES) {
+    if (tripped) {
+      await bot.sendToChannel(
+        `**[CIRCUIT BREAKER]** ${name}\n\nStopped retrying after ${taskCircuitBreaker.status(name).failures} consecutive failures. Will retry in 30 minutes.`,
+      );
+    } else if (retryCount < MAX_TASK_RETRIES) {
       const delayMs = RETRY_DELAY_MS * (retryCount + 1);
       console.log(`[${name}] Retrying in ${delayMs / 60000} minutes...`);
       await logToFile(name, `RETRY scheduled in ${delayMs / 60000}min`);
@@ -448,6 +508,17 @@ async function executeTask(
 export function startScheduler(agent: KodaAgent, bot: KodaBot): void {
   console.log(`Scheduling ${Object.keys(TASKS).length} tasks from ~/.koda/tasks.json`);
 
+  // Wire up progress callback for 30s task updates
+  agent.setProgressCallback((taskName, text) => {
+    void bot.sendToChannel(`**[${taskName}]** ${text}`);
+  });
+
+  // Clean up stale sessions from previous run
+  void sessionRegistry.cleanupStale();
+
+  // Detect and run missed tasks from downtime
+  void detectMissedTasks(TASKS, agent, bot);
+
   for (const [name, task] of Object.entries(TASKS)) {
     cron.schedule(task.cron, () => {
       void executeTask(name, task, agent, bot);
@@ -463,10 +534,11 @@ export function startScheduler(agent: KodaAgent, bot: KodaBot): void {
   }, { timezone: "Europe/Oslo" });
   console.log(`  daily_digest: 0 21 * * *`);
 
-  // Dream cycle + backup — 3:07 AM
+  // Dream cycle (LLM-driven) + backup — 3:07 AM
   cron.schedule("7 3 * * *", () => {
-    void runDreamCycle(bot);
-    setTimeout(() => void autoBackup(), 60_000);
+    void runDreamCycle(agent, bot).then(() => {
+      setTimeout(() => void autoBackup(), 60_000);
+    });
   }, { timezone: "Europe/Oslo" });
   console.log(`  dream_cycle + auto_backup: 7 3 * * *`);
 

@@ -35,6 +35,15 @@ export async function autoObserve(
     content += `\n${dateHeader}\n${line}\n`;
   }
 
+  // Cap at 500 lines — drop oldest entries to prevent bloat between dream cycles
+  const lines = content.split("\n");
+  if (lines.length > 500) {
+    // Keep header (first 5 lines) + newest entries
+    const header = lines.slice(0, 5);
+    const body = lines.slice(5);
+    content = [...header, ...body.slice(body.length - 495)].join("\n");
+  }
+
   await writeFile(OBS_FILE, content, "utf-8");
 }
 
@@ -100,6 +109,62 @@ export async function observeTaskResult(
       );
     }
   }
+}
+
+// --- Freshness warnings for stale memories ---
+
+/**
+ * Check learnings.md for stale entries and return warning text.
+ * Called at startup and after dream cycles to flag outdated knowledge.
+ */
+export async function checkMemoryFreshness(): Promise<string | null> {
+  const learningsFile = `${KODA_HOME}/learnings.md`;
+  const obsFile = OBS_FILE;
+  const warnings: string[] = [];
+
+  // Check learnings.md modification time
+  try {
+    const { stat } = await import("node:fs/promises");
+    const s = await stat(learningsFile);
+    const ageDays = Math.floor((Date.now() - s.mtimeMs) / 86_400_000);
+    if (ageDays > 14) {
+      warnings.push(`learnings.md hasn't been updated in ${ageDays} days — content may be stale. Verify before acting on it.`);
+    }
+  } catch { /* file doesn't exist */ }
+
+  // Check observations.md for old undated entries
+  try {
+    const content = await readFile(obsFile, "utf-8");
+    const datePattern = /^## (\d{4}-\d{2}-\d{2})/gm;
+    let oldestDate: string | null = null;
+    let match: RegExpExecArray | null;
+    while ((match = datePattern.exec(content)) !== null) {
+      if (!oldestDate || match[1] < oldestDate) oldestDate = match[1];
+    }
+    if (oldestDate) {
+      const ageDays = Math.floor((Date.now() - new Date(oldestDate).getTime()) / 86_400_000);
+      if (ageDays > 30) {
+        warnings.push(`observations.md has entries from ${oldestDate} (${ageDays} days ago). Dream cycle should prune these.`);
+      }
+    }
+  } catch { /* file doesn't exist */ }
+
+  return warnings.length > 0 ? warnings.join("\n") : null;
+}
+
+/**
+ * Wrap a memory string with a freshness note if it's old.
+ * Matches the leak's memoryFreshnessNote pattern.
+ */
+export function addFreshnessNote(content: string, mtimeMs: number): string {
+  const ageDays = Math.floor((Date.now() - mtimeMs) / 86_400_000);
+  if (ageDays <= 7) return content;
+
+  const note = ageDays <= 30
+    ? `Note: this memory is ${ageDays} days old. It should still be accurate but verify critical details against current state.`
+    : `Warning: this memory is ${ageDays} days old and may be significantly outdated. Verify against current code/config before relying on it.`;
+
+  return `[FRESHNESS: ${note}]\n\n${content}`;
 }
 
 function detectContentType(
