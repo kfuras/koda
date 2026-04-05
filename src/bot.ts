@@ -18,6 +18,7 @@ import {
   DISCORD_ALLOWED_USERS,
   RATE_LIMIT_MS,
   CONTENT_HUB_DIR,
+  KODA_HOME,
 } from "./config.js";
 import { type KodaAgent } from "./agent.js";
 import { teleportSave } from "./teleport.js";
@@ -268,6 +269,47 @@ export class KodaBot {
     await message.reply({ content: status, allowedMentions: { repliedUser: false } });
   }
 
+  private async sendTaskList(message: Message): Promise<void> {
+    try {
+      const tasksFile = resolve(KODA_HOME, "tasks.json");
+      const raw = await readFile(tasksFile, "utf-8");
+      const tasks = JSON.parse(raw) as Record<string, { cron: string; type: string; prompt: string }>;
+
+      // Also load today's results to show status
+      const today = new Date().toISOString().slice(0, 10);
+      let results: Record<string, { status: string }> = {};
+      try {
+        const resultsFile = resolve(KODA_HOME, `data/.task-results/${today}.json`);
+        results = JSON.parse(await readFile(resultsFile, "utf-8"));
+      } catch { /* no results yet */ }
+
+      const lines = Object.entries(tasks).map(([name, task]) => {
+        const status = results[name]?.status;
+        const icon = status === "ok" ? "✅" : status === "failed" ? "❌" : status === "healed" ? "🔧" : "⏳";
+        return `${icon} ${name.padEnd(24)} ${task.cron.padEnd(18)} ${task.type}`;
+      });
+
+      const output = [
+        "```",
+        `Scheduled Tasks (${Object.keys(tasks).length}) — ${today}`,
+        `─────────────────────────────────────────────────────`,
+        `   Name                     Cron               Type`,
+        ...lines,
+        "```",
+      ].join("\n");
+
+      const chunks = chunkMessage(output);
+      for (const chunk of chunks) {
+        await message.reply({ content: chunk, allowedMentions: { repliedUser: false } });
+      }
+    } catch (err) {
+      await message.reply({
+        content: `Failed to load tasks: ${err instanceof Error ? err.message : String(err)}`,
+        allowedMentions: { repliedUser: false },
+      });
+    }
+  }
+
   private async handleTeleport(message: Message): Promise<void> {
     const summary = message.content.replace(/^!teleport\s*/i, "").trim() || "Current conversation context";
 
@@ -319,6 +361,10 @@ export class KodaBot {
     const trimmed = message.content.trim().toLowerCase();
     if (trimmed === "!status") {
       await this.sendStatus(message);
+      return;
+    }
+    if (trimmed === "!tasks") {
+      await this.sendTaskList(message);
       return;
     }
     if (trimmed === "!teleport" || trimmed.startsWith("!teleport ")) {
