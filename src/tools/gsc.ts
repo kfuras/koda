@@ -100,8 +100,8 @@ const submitSitemap = tool(
   "gsc_submit_sitemap",
   "Submit a sitemap to Google Search Console.",
   {
-    site_url: z.string().describe("Site URL (e.g., 'sc-domain:notipo.com')"),
-    sitemap_url: z.string().url().describe("Full URL of the sitemap (e.g., 'https://notipo.com/sitemap.xml')"),
+    site_url: z.string().describe("Site URL (e.g., 'sc-domain:example.com')"),
+    sitemap_url: z.string().url().describe("Full URL of the sitemap (e.g., 'https://example.com/sitemap.xml')"),
   },
   async ({ site_url, sitemap_url }) => {
     const script = `
@@ -146,7 +146,7 @@ const inspectUrl = tool(
   "gsc_inspect_url",
   "Check the indexing status of a URL in Google Search Console.",
   {
-    site_url: z.string().describe("Site URL (e.g., 'sc-domain:notipo.com')"),
+    site_url: z.string().describe("Site URL (e.g., 'sc-domain:example.com')"),
     inspection_url: z.string().url().describe("The URL to inspect"),
   },
   async ({ site_url, inspection_url }) => {

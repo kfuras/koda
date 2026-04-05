@@ -29,6 +29,7 @@ const TEMPLATE_FILES = [
   { src: "learnings.md", dst: "learnings.md" },
   { src: "goals.md", dst: "goals.md" },
   { src: "mcp-servers.json", dst: "mcp-servers.json" },
+  { src: "tasks.json", dst: "tasks.json" },
 ];
 
 function init() {

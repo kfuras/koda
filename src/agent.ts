@@ -7,7 +7,7 @@ import type {
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { SYSTEM_PROMPT, AGENT_DEFAULTS, CONTENT_HUB_DIR, KODA_HOME, TASK_LIMITS, DEFAULT_TASK_LIMITS } from "./config.js";
+import { SYSTEM_PROMPT, AGENT_DEFAULTS, CONTENT_HUB_DIR, KODA_HOME, DEFAULT_TASK_LIMITS } from "./config.js";
 import { agentToolsServer } from "./tools/agent-tools.js";
 import { gscServer } from "./tools/gsc.js";
 
@@ -228,8 +228,9 @@ export class KodaAgent {
   async runIsolatedTask(
     taskName: string,
     prompt: string,
+    taskLimits?: { maxTurns: number; maxBudgetUsd: number },
   ): Promise<{ text: string; cost: number; turns: number; isError: boolean }> {
-    const limits = TASK_LIMITS[taskName] ?? DEFAULT_TASK_LIMITS;
+    const limits = taskLimits ?? DEFAULT_TASK_LIMITS;
     const controller = new AbortController();
 
     // Create a one-shot prompt (no streaming input)

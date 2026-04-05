@@ -75,29 +75,7 @@ export const AGENT_DEFAULTS = {
   maxBudgetUsd: CONFIG.agent.max_budget_usd,
 } as const;
 
-// Per-task turn limits and budget caps
-export const TASK_LIMITS: Record<string, { maxTurns: number; maxBudgetUsd: number }> = {
-  youtube_analytics: { maxTurns: 8, maxBudgetUsd: 2 },
-  gsc_analytics: { maxTurns: 10, maxBudgetUsd: 3 },
-  instagram_analytics: { maxTurns: 8, maxBudgetUsd: 2 },
-  bluesky_stats: { maxTurns: 5, maxBudgetUsd: 1 },
-  learnings_review: { maxTurns: 5, maxBudgetUsd: 1 },
-  skool_member_sync: { maxTurns: 8, maxBudgetUsd: 2 },
-  goal_check: { maxTurns: 5, maxBudgetUsd: 1 },
-  meta_token_check: { maxTurns: 5, maxBudgetUsd: 1 },
-  x_feed_scan: { maxTurns: 10, maxBudgetUsd: 3 },
-  viral_tweet_scan: { maxTurns: 15, maxBudgetUsd: 5 },
-  cta_replies: { maxTurns: 10, maxBudgetUsd: 3 },
-  social_post: { maxTurns: 15, maxBudgetUsd: 5 },
-  brand_voice_learn: { maxTurns: 15, maxBudgetUsd: 5 },
-  voice_profile_refresh: { maxTurns: 10, maxBudgetUsd: 3 },
-  conversation_memory: { maxTurns: 10, maxBudgetUsd: 3 },
-  content_proposal: { maxTurns: 20, maxBudgetUsd: 8 },
-  skool_post: { maxTurns: 20, maxBudgetUsd: 8 },
-  x_article: { maxTurns: 30, maxBudgetUsd: 10 },
-  lesson_draft: { maxTurns: 25, maxBudgetUsd: 8 },
-};
-
+// Default task limits — tasks can override via "limits" field in tasks.json
 export const DEFAULT_TASK_LIMITS = { maxTurns: 15, maxBudgetUsd: 5 };
 
 export const DAILY_BUDGET_USD = CONFIG.agent.daily_budget_usd ?? parseFloat(process.env.DAILY_BUDGET_USD ?? "50");
