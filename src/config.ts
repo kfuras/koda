@@ -26,14 +26,11 @@ function loadConfig(): KodaConfig {
 
 export const CONFIG = loadConfig();
 
-// Load env files in order: ~/.koda/.env → content-hub/.env → local .env
-// First one to set a var wins (dotenv doesn't override existing)
+// Load env: ~/.koda/.env first, then local .env as override
 dotenv.config({ path: resolve(KODA_HOME, ".env") });
-const contentHubDir = CONFIG.paths.content_hub || process.env.CONTENT_HUB_DIR || "";
-if (contentHubDir) {
-  dotenv.config({ path: resolve(contentHubDir, ".env") });
-}
 dotenv.config(); // local .env can override
+
+const contentHubDir = CONFIG.paths.content_hub || process.env.CONTENT_HUB_DIR || "";
 
 // --- Environment ---
 
