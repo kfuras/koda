@@ -114,14 +114,17 @@ src/
 │                        - Issue opened → agent triages
 │                        - Push to main → agent checks impact
 ├── config.ts          # Environment, system prompt, agent defaults
-├── manifests.ts       # Plugin manifest loading
+├── manifests.ts       # Plugin manifest loading (~/.koda/manifests/*.json)
+├── skills.ts          # Skill loading (~/.koda/skills/*.md → system prompt)
 └── tools/
     ├── gsc.ts         # Google Search Console MCP server
-    └── agent-tools.ts # 4 autonomous agent tools
+    └── agent-tools.ts # 6 autonomous agent tools
                          - observe() — record patterns/facts for dream cycle
                          - propose_task() — self-initiate work
                          - track_outcome() — schedule content performance checks
                          - ultraplan() — structured multi-phase planning
+                         - check_health() — pm2 status, logs, error summary
+                         - restart_self() — restart own pm2 process
 ```
 
 ## How It Works
@@ -184,6 +187,31 @@ When a scheduled task fails:
 5. Agent diagnoses, fixes scripts/configs, and retries
 6. Max 2 heal attempts before escalating to Discord
 
+The agent can also self-diagnose using built-in tools:
+- `check_health` — pm2 status, restart count, uptime, recent errors from log
+- `restart_self` — restart own pm2 process with a 2s delay for clean shutdown
+- `self-heal` skill — step-by-step recipe: diagnose → identify failure type → fix → verify → report
+
+### Skills
+
+Skills are markdown files at `~/.koda/skills/*.md` loaded into the system prompt at startup. They give Koda step-by-step recipes for common workflows so it follows a known path instead of improvising.
+
+Built-in skills:
+- `delete-wordpress-post` — Notipo API flow to safely delete a post
+- `publish-blog-post` — GSC keyword research → draft → user approval → Notipo CLI publish
+- `brand-voice-social` — voice guide for X and Bluesky posts
+- `self-heal` — diagnostic recipe for errors and crashes
+
+To add a skill, create `~/.koda/skills/my-skill.md` with frontmatter:
+```markdown
+---
+name: my-skill
+description: What this skill does
+when: When to use it
+---
+Step-by-step instructions...
+```
+
 ### ULTRAPLAN
 
 For complex multi-step tasks, the agent creates a structured plan:
@@ -212,7 +240,8 @@ All agent data lives in `~/.koda/`:
 | `user.md` | User profile |
 | `learnings.md` | Consolidated patterns (read at session start) |
 | `goals.md` | Active objectives |
-| `manifests/` | Plugin tool manifests |
+| `manifests/` | Plugin tool manifests (JSON, loaded into system prompt) |
+| `skills/` | Workflow skill files (Markdown, loaded into system prompt) |
 | `scripts/` | Helper scripts (dream-cycle.sh legacy fallback) |
 | `data/observations.md` | Raw observations (capped at 500 lines) |
 | `data/observations-archive.md` | Expired observations |
