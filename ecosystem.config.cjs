@@ -15,6 +15,7 @@ module.exports = {
     merge_logs: true,
     env: {
       NODE_ENV: "production",
+      TICK_INTERVAL_MS: "0",
     },
   }],
 };

@@ -45,7 +45,12 @@ const TASKS: Record<string, TaskDef> = {
       "Check top queries (clicks, impressions, CTR, position). " +
       "Log to data/analytics/{date}.json alongside other analytics. " +
       "Record observations about trending queries or ranking changes. " +
-      "If any page dropped significantly in position or a new query appeared in top 10, report it.",
+      "If any page dropped significantly in position or a new query appeared in top 10, report it. " +
+      "SEO CONTENT OPPORTUNITIES: If you spot a query with high impressions but low CTR, " +
+      "or a new query trending upward, or a keyword gap (no existing page ranking for a relevant query), " +
+      "append a blog post idea to data/drafts/blog-content-ideas.md with: " +
+      "the query, current metrics, and a suggested blog post title + angle. " +
+      "These ideas should target kjetilfuras.com (automation/AI practitioner content).",
     cron: "45 8 * * *",
     type: "silent",
   },
@@ -112,16 +117,22 @@ const TASKS: Record<string, TaskDef> = {
     prompt:
       "VIRAL TWEET SCAN: Use the scan_viral_tweets tool with min_likes=100. " +
       "Pick the top 3-5 tweets with highest engagement. " +
-      "For each, draft a tactical quote tweet in Kjetil's voice (read data/brand-voice-skill.md): " +
-      "- Use numbered lists (1-5 steps), not bullet dashes " +
-      "- Lead with a bold claim, then tactical breakdown " +
-      "- Every claim must be verifiable against our actual codebase — NO hallucinations " +
-      "- End with a punchy one-liner " +
-      "Save drafts to data/drafts/quote-tweet-drafts-{date}.md. " +
-      "Report the top 3 drafts with original tweet URLs for approval. " +
-      "DO NOT post without approval.",
+      "IMPORTANT: Read data/brand-voice-skill.md FIRST — especially the 'How Kjetil Should Adapt This' section. " +
+      "For each, draft a tactical quote tweet. CRITICAL RULES: " +
+      "- NEVER write 'I built this' or talk about yourself — reframe for the READER as a business opportunity " +
+      "- Use openers like 'the play:', 'the business hiding in this:', 'the move nobody will make:' " +
+      "- Use numbered lists (3-5 steps), each step ONE line, actionable and specific " +
+      "- Include dollar amounts ('$2K each', '$300/mo recurring') " +
+      "- End with a punchy closer ('you're welcome.', 'stop overthinking it.') " +
+      "- Every claim must be verifiable — NO hallucinations " +
+      "For each draft, use search_reaction_clip to find a matching reaction clip. " +
+      "Match the energy of the text: hype text = hype/celebration clip, tactical text = someone working intensely, " +
+      "mind-blowing fact = mind blown clip. Search with a mood keyword, not the topic itself. " +
+      "Save drafts to data/drafts/quote-tweet-drafts-{date}.md (include the clip path for each). " +
+      "Pick the best draft and post it to X. Post to Bluesky too with the same text. " +
+      "Report what you posted to #koda-proactive.",
     cron: "0 9 * * *",
-    type: "approval",
+    type: "silent",
     timeout: 600,
   },
   cta_replies: {
@@ -131,10 +142,10 @@ const TASKS: Record<string, TaskDef> = {
       "For qualifying tweets, it drafts CTA replies linking to Build & Automate " +
       "(https://go.kjetilfuras.com/build-automate-x) or Notipo (https://notipo.com). " +
       "The CTA should bridge the tweet topic to the product — not 'follow for more'. " +
-      "Report drafts for approval. " +
-      "If approved, run: python3 scripts/cta_reply.py --min-likes 10 --post",
+      "Post the CTA replies directly: python3 scripts/cta_reply.py --min-likes 10 --post. " +
+      "Report what you posted to #koda-proactive.",
     cron: "30 9 * * *",
-    type: "approval",
+    type: "silent",
   },
 
   // --- Every 3 days ---
@@ -143,9 +154,18 @@ const TASKS: Record<string, TaskDef> = {
       "CONTENT PROPOSAL: Read GOALS.md to identify the biggest gap. Read LEARNINGS.md for " +
       "what content performs best. Search X/web for trending topics in your niche. " +
       "Also run: python3 scripts/trending_topics.py --save to scan YouTube for trending topics. " +
+      "Also read data/drafts/blog-content-ideas.md for SEO-driven blog post ideas from GSC data. " +
       "Use the trending data to inform your proposals — pick topics with proven view velocity. " +
-      "Draft 2-3 content ideas (Short, social post, or Skool lesson) that move the needle " +
-      "on the weakest goal. Report proposals with trending data backing each idea. " +
+      "Draft 2-3 content ideas across these types: " +
+      "- YouTube Short (growth) " +
+      "- X/Bluesky social post (engagement) " +
+      "- Skool lesson (community value) " +
+      "- Blog post for kjetilfuras.com (SEO — target specific queries from GSC data) " +
+      "IMPORTANT for blog posts: content must be UNIQUE from Skool posts. " +
+      "Skool = behind-the-scenes how-I-built-it for members. " +
+      "Blog = SEO-optimized tutorials and guides targeting search queries for public audience. " +
+      "Same topic is OK but different angle and depth. " +
+      "Report proposals with trending/GSC data backing each idea. " +
       "DO NOT create or publish anything without approval.",
     cron: "0 10 1,4,7,10,13,16,19,22,25,28 * *",
     type: "approval",
@@ -156,16 +176,23 @@ const TASKS: Record<string, TaskDef> = {
       "(rotate: Notipo, Build & Automate, daemon/Claude Code). Use a different angle than " +
       "last time (check data/drafts/ for recent posts). Draft the post matching Kjetil's voice " +
       "(see voice-reference.md). Use the generate_image tool if relevant. Report the draft + " +
-      "image for approval. DO NOT post without explicit approval.",
+      "image. Post to X and Bluesky. Report what you posted to #koda-proactive.",
     cron: "0 11 2,5,8,11,14,17,20,23,26,29 * *",
-    type: "approval",
+    type: "silent",
   },
   skool_post: {
     prompt:
       "SKOOL COMMUNITY POST: Draft a community post for Build & Automate (skool.com/build-automate). " +
-      "Topic should be based on recent work — what you built, what you learned, behind-the-scenes " +
-      "of the daemon/pipeline. Match Kjetil's practitioner voice. Use the generate_image tool " +
-      "(ALWAYS include an image). Report the draft + image for approval. " +
+      "Step 1: Read data/drafts/skool-content-calendar.md — pick the NEXT unposted topic. " +
+      "Step 2: Check git log in ~/code/koda and ~/code/content-hub for real code related to that topic. " +
+      "Step 3: Write a tactical post with real code snippets, actual commands, and concrete results. " +
+      "Quality over quantity — show, don't tell. Match Kjetil's practitioner voice. " +
+      "Use the generate_image tool (ALWAYS include an image — screenshots of real output preferred). " +
+      "Step 4: After drafting, mark the topic as DONE in skool-content-calendar.md. " +
+      "Step 5: Check if the backlog is getting thin (under 3 items). If so, scan git commits " +
+      "for features/fixes NOT already covered by a DONE topic or existing backlog item, " +
+      "and add 2-3 new topic ideas to the backlog section. " +
+      "Report the draft + image for approval. " +
       "Label: General discussion. DO NOT post without explicit approval.",
     cron: "0 11 3,6,9,12,15,18,21,24,27,30 * *",
     type: "approval",
@@ -218,6 +245,24 @@ const TASKS: Record<string, TaskDef> = {
       "Log what changed to data/autonomous-logs/{date}.log.",
     cron: "0 9 * * 6",
     type: "silent",
+  },
+  brand_voice_learn: {
+    prompt:
+      "BRAND VOICE LEARNING: Analyze what's working and update the brand voice file. " +
+      "Step 1: Pull your last 20 X posts using get_my_tweets (count=20). " +
+      "Step 2: Rank them by engagement (likes + retweets + bookmarks). " +
+      "Step 3: For the top 5, identify the FORMAT patterns — opener style, numbered vs prose, " +
+      "dollar amounts yes/no, closer style, self-focused vs reader-focused. " +
+      "Step 4: For the bottom 5, identify what's different about the format. " +
+      "Step 5: Also scan 10 viral tweets (scan_viral_tweets min_likes=500) and note " +
+      "which FORMAT patterns the highest-engagement ones use. " +
+      "Step 6: Read data/brand-voice-skill.md. Update ONLY the 'Rules Summary' and examples " +
+      "if the data shows a clear pattern we're missing or a rule that's wrong. " +
+      "DO NOT change rules that are already working. Only ADD new insights or REFINE existing ones. " +
+      "Step 7: Report what you found and what you changed (or didn't change) to #koda-proactive.",
+    cron: "0 11 * * 1",
+    type: "silent",
+    timeout: 600,
   },
   lesson_draft: {
     prompt:
@@ -457,6 +502,10 @@ function startTickLoop(agent: KodaAgent, bot: KodaBot): NodeJS.Timeout {
     });
   };
 
+  if (TICK_INTERVAL_MS <= 0) {
+    console.log("  tick_loop: DISABLED (TICK_INTERVAL_MS=0)");
+    return undefined as unknown as ReturnType<typeof setInterval>;
+  }
   return setInterval(tick, TICK_INTERVAL_MS);
 }
 

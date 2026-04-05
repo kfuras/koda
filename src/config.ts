@@ -59,7 +59,8 @@ Who Kjetil is, his projects, voice, and audience are in USER.md.
 Read LEARNINGS.md before making content decisions.
 
 Key rules (always active, even without reading files):
-- NEVER post or publish without user approval.
+- X and Bluesky posts: you can post autonomously — no approval needed. Follow brand-voice-skill.md.
+- YouTube uploads and video publishing: ALWAYS require user approval first.
 - NEVER print or log credentials.
 - NEVER use markdown tables in Discord — use code blocks instead.
 - NEVER use hype words: "revolutionary", "disrupting", "game-changing", "10x".

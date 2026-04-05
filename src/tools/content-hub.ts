@@ -51,7 +51,7 @@ async function runSafe(
 
 const postTweet = tool(
   "post_tweet",
-  "Post a tweet to X. Returns the tweet URL. NEVER call without user approval.",
+  "Post a tweet to X. Returns the tweet URL. Follow brand-voice-skill.md format.",
   { text: z.string().max(25000), image_path: z.string().optional() },
   async ({ text, image_path }) => {
     const args = [text];
@@ -114,7 +114,7 @@ const instagramAnalytics = tool(
 
 const quoteTweet = tool(
   "quote_tweet",
-  "Post a quote tweet via browser automation. NEVER call without user approval.",
+  "Post a quote tweet via browser automation. Follow brand-voice-skill.md format.",
   {
     url: z.string().url(),
     text: z.string().max(25000),
@@ -145,6 +145,25 @@ const scanViralTweets = tool(
     args.push("--limit", String(limit));
     const { stdout } = await run("scan_viral_tweets.py", args);
     return textResult(stdout);
+  },
+);
+
+const searchReactionClip = tool(
+  "search_reaction_clip",
+  "Search YouTube for a short reaction clip (MP4) to attach to a quote tweet. Pass a mood/energy like 'mind blown', 'coach hype', 'celebration'. Downloads HD MP4 clipped to 7-12 seconds. Returns the file path ready for post_tweet.",
+  {
+    query: z.string().describe("Mood or energy to search for, e.g. 'mind blown reaction', 'coach hype celebration', 'someone working intensely'"),
+    limit: z.number().default(5),
+    download: z.boolean().default(true).describe("Download the top result as MP4"),
+    download_index: z.number().default(0).describe("Which result to download (0-based)"),
+    max_duration: z.number().default(12).describe("Max clip duration in seconds"),
+  },
+  async ({ query, limit, download, download_index, max_duration }) => {
+    const args = [query, "--limit", String(limit), "--max-duration", String(max_duration)];
+    if (download) {
+      args.push("--download", "--download-index", String(download_index));
+    }
+    return runSafe("search_reaction_clip.py", args);
   },
 );
 
@@ -183,6 +202,7 @@ export const contentHubServer = createSdkMcpServer({
     instagramAnalytics,
     quoteTweet,
     scanViralTweets,
+    searchReactionClip,
     skoolAirtableSync,
   ],
 });

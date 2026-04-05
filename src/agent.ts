@@ -277,6 +277,22 @@ export class KodaAgent {
           console.log(
             `[agent] Turn complete (${result.num_turns} turns, $${result.total_cost_usd.toFixed(2)})`,
           );
+
+          // Auto-recover from max_turns or other fatal errors
+          if (result.subtype !== "success") {
+            console.log(`[agent] Fatal error (${result.subtype}) — restarting session in 5s...`);
+            await new Promise((r) => setTimeout(r, 5000));
+            if (this.running) {
+              this.sessionId = undefined;
+              this.abortController = new AbortController();
+              try {
+                await this.start();
+                console.log("[agent] Session restarted after max_turns recovery");
+              } catch (restartErr) {
+                console.error("[agent] Recovery restart failed:", restartErr);
+              }
+            }
+          }
         }
       }
     } catch (err) {
