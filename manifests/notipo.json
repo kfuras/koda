@@ -11,13 +11,42 @@
     "Pro features: image generation, sync-now (15s cooldown)",
     "All responses wrapped in { data: ... } on success, { message: '...' } on error"
   ],
+  "npm": {
+    "package": "notipo",
+    "install": "npm install -g notipo",
+    "run": "npx notipo <command>"
+  },
   "cli": {
     "command": "npx notipo",
-    "usage": [
-      "npx notipo posts create --title 'Title' --body 'markdown content' --publish --wait",
-      "npx notipo posts list --limit 5",
-      "npx notipo jobs"
-    ]
+    "commands": {
+      "status": "Show Notion and WordPress connection status",
+      "sync": "Trigger an immediate Notion poll (Pro only, 15s cooldown)",
+      "posts": "List all posts with status",
+      "posts create": "Create a post in Notion and sync to WordPress",
+      "posts delete <id>": "Delete a post (cleans up WordPress + Notion)",
+      "jobs": "List recent sync and publish jobs"
+    },
+    "create_flags": {
+      "--title <title>": "required — post title",
+      "--body <text>": "optional — markdown content",
+      "--category <cat>": "optional — WordPress category name",
+      "--tags <a,b>": "optional — comma-separated tags",
+      "--seo-keyword <kw>": "optional — focus keyword for SEO",
+      "--image-title <title>": "optional — featured image text overlay (Pro)",
+      "--publish": "optional — publish immediately (default: draft)",
+      "--wait": "optional — wait for sync to complete before returning"
+    },
+    "examples": [
+      "npx notipo posts create --title 'My Post' --body '# Hello\nContent here' --category 'AI' --publish --wait",
+      "npx notipo posts",
+      "npx notipo jobs",
+      "npx notipo sync",
+      "npx notipo status"
+    ],
+    "config": {
+      "env": "NOTIPO_URL and NOTIPO_API_KEY environment variables",
+      "file": "~/.notipo/config.json (written by notipo login)"
+    }
   },
   "api": {
     "base_url": "https://notipo.com",
