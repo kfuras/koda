@@ -394,8 +394,13 @@ async function detectMissedTasks(
 
   if (missedTasks.length === 0) return;
 
-  // Sort by scheduled time (most recent first) and cap at MAX_MISSED_RECOVERY
-  missedTasks.sort((a, b) => (b.hour * 60 + b.minute) - (a.hour * 60 + a.minute));
+  // Sort: approval tasks first, then by most recent scheduled time
+  missedTasks.sort((a, b) => {
+    const aApproval = a.task.type === "approval" ? 0 : 1;
+    const bApproval = b.task.type === "approval" ? 0 : 1;
+    if (aApproval !== bApproval) return aApproval - bApproval;
+    return (b.hour * 60 + b.minute) - (a.hour * 60 + a.minute);
+  });
   const toRecover = missedTasks.slice(0, MAX_MISSED_RECOVERY);
   const skipped = missedTasks.length - toRecover.length;
 
