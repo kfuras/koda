@@ -365,14 +365,16 @@ async function detectMissedTasks(
   const now = new Date();
   let missed = 0;
 
+  const MAX_MISSED_RECOVERY = 3;
+  const STAGGER_DELAY_MS = 60_000; // 1 minute between missed tasks
+  const missedTasks: Array<{ name: string; task: TaskDef; hour: number; minute: number }> = [];
+
   for (const [name, task] of Object.entries(tasks)) {
     // Skip if already ran today
     if (results[name]?.status === "ok" || results[name]?.status === "healed") continue;
 
     // Parse cron to see if it should have fired today before now
     try {
-      // node-cron doesn't expose "next run" directly, so we check if the cron
-      // pattern includes a specific hour and that hour has passed
       const parts = task.cron.split(/\s+/);
       if (parts.length >= 2) {
         const minute = parseInt(parts[0], 10);
@@ -380,12 +382,8 @@ async function detectMissedTasks(
         if (!isNaN(hour) && !isNaN(minute)) {
           const scheduledTime = new Date(now);
           scheduledTime.setHours(hour, minute, 0, 0);
-          // If the scheduled time already passed today and task hasn't run
           if (scheduledTime < now) {
-            missed++;
-            console.log(`[missed] ${name} was scheduled for ${hour}:${String(minute).padStart(2, "0")} but hasn't run — executing now`);
-            await logToFile(name, `MISSED — executing on startup recovery`);
-            void executeTask(name, task, agent, bot);
+            missedTasks.push({ name, task, hour, minute });
           }
         }
       }
@@ -394,9 +392,29 @@ async function detectMissedTasks(
     }
   }
 
-  if (missed > 0) {
-    console.log(`[missed] Recovered ${missed} missed task(s)`);
-    await bot.sendToChannel(`**[startup]** Recovered ${missed} missed task(s) from downtime.`);
+  if (missedTasks.length === 0) return;
+
+  // Sort by scheduled time (most recent first) and cap at MAX_MISSED_RECOVERY
+  missedTasks.sort((a, b) => (b.hour * 60 + b.minute) - (a.hour * 60 + a.minute));
+  const toRecover = missedTasks.slice(0, MAX_MISSED_RECOVERY);
+  const skipped = missedTasks.length - toRecover.length;
+
+  console.log(`[missed] Found ${missedTasks.length} missed tasks, recovering ${toRecover.length}${skipped > 0 ? ` (skipping ${skipped} oldest)` : ""}`);
+  await bot.sendToChannel(
+    `**[startup]** Recovering ${toRecover.length} missed task(s)${skipped > 0 ? ` (${skipped} older tasks skipped)` : ""}: ${toRecover.map(t => t.name).join(", ")}`,
+  );
+
+  // Stagger execution — don't fire all at once
+  for (let i = 0; i < toRecover.length; i++) {
+    const { name, task, hour, minute } = toRecover[i];
+    const delay = i * STAGGER_DELAY_MS;
+    console.log(`[missed] ${name} (scheduled ${hour}:${String(minute).padStart(2, "0")}) — ${delay > 0 ? `executing in ${delay / 1000}s` : "executing now"}`);
+    await logToFile(name, `MISSED — recovering on startup${delay > 0 ? ` (staggered ${delay / 1000}s)` : ""}`);
+    if (delay > 0) {
+      setTimeout(() => void executeTask(name, task, agent, bot), delay);
+    } else {
+      void executeTask(name, task, agent, bot);
+    }
   }
 }
 
