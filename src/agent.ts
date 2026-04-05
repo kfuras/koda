@@ -5,6 +5,7 @@ import type {
   SDKAssistantMessage,
 } from "@anthropic-ai/claude-agent-sdk/entrypoints/sdk/coreTypes.js";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { SYSTEM_PROMPT, AGENT_DEFAULTS, CONTENT_HUB_DIR, TASK_LIMITS, DEFAULT_TASK_LIMITS } from "./config.js";
 import { contentHubServer } from "./tools/content-hub.js";
@@ -87,41 +88,57 @@ function classifyRisk(toolName: string): "LOW" | "MEDIUM" | "HIGH" {
   return "LOW";
 }
 
-// --- Shared MCP config ---
+// --- MCP config: built-in SDK servers + external from mcp-servers.json ---
+
+const MCP_SERVERS_FILE = resolve(import.meta.dirname ?? ".", "..", "mcp-servers.json");
+
+interface ExternalMcpDef {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+  defaults?: Record<string, string>;
+}
+
+function resolveEnvVar(value: string, defaults?: Record<string, string>): string {
+  return value.replace(/\$([A-Z_]+)/g, (_match, varName: string) => {
+    return process.env[varName] ?? defaults?.[varName] ?? "";
+  });
+}
+
+function loadExternalMcpServers(): Record<string, { command: string; args: string[]; env?: Record<string, string> }> {
+  try {
+    const raw = readFileSync(MCP_SERVERS_FILE, "utf-8");
+    const defs: Record<string, ExternalMcpDef> = JSON.parse(raw);
+    const servers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
+
+    for (const [name, def] of Object.entries(defs)) {
+      servers[name] = {
+        command: resolveEnvVar(def.command, def.defaults),
+        args: def.args.map(a => resolveEnvVar(a, def.defaults)),
+        ...(def.env ? {
+          env: Object.fromEntries(
+            Object.entries(def.env).map(([k, v]) => [k, resolveEnvVar(v, def.defaults)]),
+          ),
+        } : {}),
+      };
+    }
+
+    console.log(`[mcp] Loaded ${Object.keys(servers).length} external servers: ${Object.keys(servers).join(", ")}`);
+    return servers;
+  } catch (err) {
+    console.error(`[mcp] Failed to load ${MCP_SERVERS_FILE}:`, err instanceof Error ? err.message : err);
+    return {};
+  }
+}
 
 function getMcpServers() {
   return {
+    // Built-in SDK servers (TypeScript, compiled in)
     "content-hub": contentHubServer,
     "agent-tools": agentToolsServer,
     gsc: gscServer,
-    context7: {
-      command: "npx",
-      args: ["-y", "@upstash/context7-mcp"],
-    },
-    youtube: {
-      command: "youtube-studio-mcp",
-      args: [],
-    },
-    "x-mcp": {
-      command: process.env.X_MCP_COMMAND ?? "python3",
-      args: [process.env.X_MCP_PATH ?? `${CONTENT_HUB_DIR}/servers/x_mcp_server.py`],
-    },
-    "bluesky-mcp": {
-      command: "npx",
-      args: ["-y", "@semihberkay/bluesky-mcp"],
-      env: {
-        BLUESKY_IDENTIFIER: process.env.BLUESKY_HANDLE ?? "kjetilfuras.bsky.social",
-        BLUESKY_PASSWORD: process.env.BLUESKY_APP_PASSWORD ?? "",
-      },
-    },
-    gmail: {
-      command: process.env.GMAIL_MCP_PYTHON ?? "/Users/YOUR_USERNAME/code/gmail-mcp/.venv/bin/python",
-      args: [process.env.GMAIL_MCP_PATH ?? "/Users/YOUR_USERNAME/code/gmail-mcp/server.py"],
-    },
-    airtable: {
-      command: process.env.AIRTABLE_MCP_COMMAND ?? "/Users/YOUR_USERNAME/code/n8n-assistant/scripts/run-airtable-mcp.sh",
-      args: [],
-    },
+    // External servers (loaded from mcp-servers.json)
+    ...loadExternalMcpServers(),
   };
 }
 
