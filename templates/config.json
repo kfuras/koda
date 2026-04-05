@@ -1,0 +1,30 @@
+{
+  "agent": {
+    "name": "Koda",
+    "owner": "YOUR_NAME",
+    "model": "claude-opus-4-6",
+    "max_turns": 25,
+    "max_budget_usd": 10,
+    "daily_budget_usd": 50
+  },
+  "paths": {
+    "content_hub": ""
+  },
+  "social": {
+    "x_handle": "",
+    "bluesky_handle": "",
+    "instagram_handle": "",
+    "youtube_channel": "",
+    "website": "",
+    "skool_group": "",
+    "skool_url": "",
+    "cta_url": "",
+    "notipo_url": ""
+  },
+  "gsc": {
+    "sites": []
+  },
+  "discord": {
+    "mention_only": false
+  }
+}

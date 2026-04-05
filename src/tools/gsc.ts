@@ -41,7 +41,7 @@ const searchAnalytics = tool(
   "gsc_search_analytics",
   "Pull Google Search Console analytics for a site. Returns search queries, clicks, impressions, CTR, and position.",
   {
-    site_url: z.string().describe("Site URL (e.g., 'sc-domain:notipo.com' or 'https://kjetilfuras.com/')"),
+    site_url: z.string().describe("Site URL (e.g., 'sc-domain:example.com' or 'https://example.com/')"),
     days: z.number().default(7).describe("Number of days to look back"),
     dimensions: z.string().default("query").describe("Comma-separated: query, page, country, device, date"),
     row_limit: z.number().default(10),

@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { type KodaAgent } from "./agent.js";
 import { type KodaBot } from "./bot.js";
-import { CONTENT_HUB_DIR, KODA_HOME, TICK_INTERVAL_MS, DAILY_BUDGET_USD } from "./config.js";
+import { CONTENT_HUB_DIR, KODA_HOME, TICK_INTERVAL_MS, DAILY_BUDGET_USD, CONFIG } from "./config.js";
 import { observeTaskResult } from "./runtime.js";
 
 const execFileAsync = promisify(execFile);
@@ -67,7 +67,7 @@ const TASKS: Record<string, TaskDef> = {
   gsc_analytics: {
     prompt:
       "Pull Google Search Console analytics for the last 7 days. " +
-      "Use gsc_search_analytics for both sc-domain:notipo.com and https://kjetilfuras.com/. " +
+      `Use gsc_search_analytics for both ${CONFIG.gsc.sites.join(" and ")}. ` +
       "Check top queries (clicks, impressions, CTR, position). " +
       "Log to data/analytics/{date}.json alongside other analytics. " +
       "Record observations about trending queries or ranking changes. " +
@@ -76,13 +76,13 @@ const TASKS: Record<string, TaskDef> = {
       "or a new query trending upward, or a keyword gap (no existing page ranking for a relevant query), " +
       "append a blog post idea to data/drafts/blog-content-ideas.md with: " +
       "the query, current metrics, and a suggested blog post title + angle. " +
-      "These ideas should target kjetilfuras.com (automation/AI practitioner content).",
+      `These ideas should target ${CONFIG.social.website} (automation/AI practitioner content).`,
     cron: "45 8 * * *",
     type: "silent",
   },
   instagram_analytics: {
     prompt:
-      "Pull Instagram analytics for @kjetilfuras. " +
+      `Pull Instagram analytics for @${CONFIG.social.instagram_handle}. ` +
       "Use the instagram_analytics tool with save=true. " +
       "Log follower count + top performing recent posts to ~/.koda/data/autonomous-logs/{date}.log. " +
       "If any Reel got notable engagement (>50 plays or >5 likes), report it.",
@@ -92,7 +92,7 @@ const TASKS: Record<string, TaskDef> = {
   bluesky_stats: {
     prompt:
       "BLUESKY + TRENDS: First call the Bluesky login MCP tool. Then pull recent posts " +
-      "(handle: kjetilfuras.bsky.social) using the get-posts MCP tool. " +
+      `(handle: ${CONFIG.social.bluesky_handle}) using the get-posts MCP tool. ` +
       "Check likes, reposts, reply counts. Log stats to data/analytics/{date}.json alongside YouTube data. " +
       "If any post did notably well or poorly, report it. " +
       "Then check the Bluesky timeline (get-timeline, limit 20) for trending AI/automation/Claude topics. " +
@@ -166,7 +166,7 @@ const TASKS: Record<string, TaskDef> = {
       "CTA REPLIES: Run: python3 scripts/cta_reply.py --min-likes 10 --dry-run. " +
       "This checks your recent tweets for any that got traction (10+ likes). " +
       "For qualifying tweets, it drafts CTA replies linking to Build & Automate " +
-      "(https://go.kjetilfuras.com/build-automate-x) or Notipo (https://notipo.com). " +
+      `(${CONFIG.social.cta_url}) or Notipo (${CONFIG.social.notipo_url}). ` +
       "The CTA should bridge the tweet topic to the product — not 'follow for more'. " +
       "Post the CTA replies directly: python3 scripts/cta_reply.py --min-likes 10 --post. " +
       "Report what you posted to #koda-proactive.",
@@ -186,7 +186,7 @@ const TASKS: Record<string, TaskDef> = {
       "- YouTube Short (growth) " +
       "- X/Bluesky social post (engagement) " +
       "- Skool lesson (community value) " +
-      "- Blog post for kjetilfuras.com (SEO — target specific queries from GSC data) " +
+      `- Blog post for ${CONFIG.social.website} (SEO — target specific queries from GSC data) ` +
       "IMPORTANT for blog posts: content must be UNIQUE from Skool posts. " +
       "Skool = behind-the-scenes how-I-built-it for members. " +
       "Blog = SEO-optimized tutorials and guides targeting search queries for public audience. " +
@@ -231,7 +231,7 @@ const TASKS: Record<string, TaskDef> = {
       "3. Pick a topic showcasing what Kjetil built (daemon, video pipeline, quote tweets, etc.) " +
       "4. Write 700-1000 word tactical article in Kjetil's voice (Corey Ganim format): " +
       "   Hook intro, 5-8 numbered sections with headings, code blocks (real code), " +
-      "   CTA to Build & Automate (https://go.kjetilfuras.com/build-automate-x) " +
+      `   CTA to Build & Automate (${CONFIG.social.cta_url}) ` +
       "5. Generate 7 headline options " +
       "6. Generate thumbnail: python3 scripts/generate_article_thumbnail.py --title 'TITLE' --output generated-images/article-thumbnail.png " +
       "7. Save to data/drafts/article-{date}-SLUG.md " +
@@ -263,7 +263,7 @@ const TASKS: Record<string, TaskDef> = {
   },
   voice_profile_refresh: {
     prompt:
-      "VOICE PROFILE REFRESH: Check if new blog posts exist on kjetilfuras.com that aren't in " +
+      `VOICE PROFILE REFRESH: Check if new blog posts exist on ${CONFIG.social.website} that aren't in ` +
       "data/voice-profile.json (compare blog_posts_analyzed list). Also pull latest X posts " +
       "(get_my_tweets, 5 most recent) and compare against real_examples in the profile. " +
       "If there are new posts to analyze, fetch and read them, then update data/voice-profile.json. " +

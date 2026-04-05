@@ -96,7 +96,7 @@ const generateImage = tool(
 
 const instagramAnalytics = tool(
   "instagram_analytics",
-  "Pull Instagram analytics for @kjetilfuras. Returns follower count, engagement, top posts.",
+  "Pull Instagram analytics. Returns follower count, engagement, top posts.",
   {
     save: z.boolean().default(true),
     json: z.boolean().default(true),
@@ -179,7 +179,7 @@ const skoolAirtableSync = tool(
     if (dry_run) args.push("--dry-run");
     if (export_only) args.push("--export");
     const { stdout } = await execFileAsync(PYTHON, [
-      process.env.SKOOL_SYNC_PATH ?? "/Users/YOUR_USERNAME/code/scripts/skool-airtable-sync.py",
+      process.env.SKOOL_SYNC_PATH ?? "skool-airtable-sync.py",
       ...args,
     ], {
       cwd: CONTENT_HUB_DIR,
