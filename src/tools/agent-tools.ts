@@ -1,7 +1,11 @@
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { writeFile, readFile, mkdir } from "node:fs/promises";
+import { writeFile, readFile, mkdir, stat } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { KODA_HOME } from "../config.js";
+
+const execFileAsync = promisify(execFile);
 
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }] };
@@ -227,10 +231,89 @@ const ultraplan = tool(
   },
 );
 
+// --- Self-healing tools ---
+
+const LOG_OUT = `${KODA_HOME}/logs/koda-out.log`;
+const LOG_ERR = `${KODA_HOME}/logs/koda-error.log`;
+
+const checkHealth = tool(
+  "check_health",
+  "Check Koda's own health: pm2 status, recent errors, log file sizes, and config validity.",
+  {},
+  async () => {
+    const results: string[] = [];
+
+    // pm2 status
+    try {
+      const { stdout } = await execFileAsync("pm2", ["jlist"]);
+      const procs: Array<{ name: string; pm2_env?: { status: string; restart_time: number; pm_uptime?: number } }> = JSON.parse(stdout);
+      const koda = procs.find(p => p.name === "koda");
+      if (koda) {
+        const status = koda.pm2_env?.status ?? "unknown";
+        const restarts = koda.pm2_env?.restart_time ?? 0;
+        const uptimeSec = koda.pm2_env?.pm_uptime
+          ? Math.floor((Date.now() - koda.pm2_env.pm_uptime) / 1000)
+          : null;
+        results.push(`pm2: ${status}, restarts=${restarts}${uptimeSec !== null ? `, uptime=${uptimeSec}s` : ""}`);
+      } else {
+        results.push("pm2: koda process not found");
+      }
+    } catch (err) {
+      results.push(`pm2: error — ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Log file sizes + last error
+    for (const [label, path] of [["stdout", LOG_OUT], ["stderr", LOG_ERR]]) {
+      try {
+        const s = await stat(path);
+        const kb = Math.round(s.size / 1024);
+        results.push(`${label}: ${kb}KB (${path})`);
+      } catch {
+        results.push(`${label}: not found`);
+      }
+    }
+
+    // Last 20 lines of error log
+    try {
+      const { stdout } = await execFileAsync("tail", ["-n", "20", LOG_ERR]);
+      if (stdout.trim()) {
+        results.push(`\nRecent errors:\n${stdout.trim()}`);
+      } else {
+        results.push("Recent errors: none");
+      }
+    } catch {
+      results.push("Recent errors: could not read");
+    }
+
+    return textResult(results.join("\n"));
+  },
+);
+
+const restartSelf = tool(
+  "restart_self",
+  "Restart the Koda pm2 process. Use after config changes or to recover from errors. " +
+  "WARNING: this will interrupt the current session. Only use if necessary.",
+  {
+    reason: z.string().describe("Why the restart is needed"),
+  },
+  async ({ reason }) => {
+    console.log(`[agent-tools] restart_self called: ${reason}`);
+    // Delay slightly so the tool result can be returned before the process dies
+    setTimeout(async () => {
+      try {
+        await execFileAsync("pm2", ["restart", "koda"]);
+      } catch (err) {
+        console.error("[agent-tools] restart_self failed:", err);
+      }
+    }, 2000);
+    return textResult(`Restarting in 2s. Reason: ${reason}`);
+  },
+);
+
 // --- MCP Server ---
 
 export const agentToolsServer = createSdkMcpServer({
   name: "agent-tools",
   version: "0.1.0",
-  tools: [observe, proposeTask, trackOutcome, ultraplan],
+  tools: [observe, proposeTask, trackOutcome, ultraplan, checkHealth, restartSelf],
 });
