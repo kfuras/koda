@@ -25,13 +25,14 @@ npm run daemon
 
 - Node.js 18+
 - Claude CLI logged in (Max subscription — no API key needed)
+- Claude Agent SDK 0.2.x (`@anthropic-ai/claude-agent-sdk`)
 - Python 3 (for content-hub scripts)
 - ffmpeg, whisper, edge-tts (for voice channel support)
 - pm2 (`npm install -g pm2`) for daemon mode
 
 ## Environment Variables
 
-All API keys are loaded from `~/code/content-hub/.env` automatically. The koda `.env` only needs:
+All API keys are loaded from `~/.koda/.env` automatically. The koda `.env` only needs:
 
 ```
 DISCORD_BOT_TOKEN=              # Discord bot token
@@ -48,12 +49,21 @@ TICK_INTERVAL_MS=300000         # Autonomous tick interval (default 5 min)
 ```
 src/
 ├── index.ts           # Entry point — boots agent, bot, scheduler, webhooks, voice
+│                        - Hot-reload file watcher (tasks.json, mcp-servers.json)
+│                        - Incoming teleport check on startup
+│                        - Memory freshness warnings on startup
 ├── cli.ts             # Terminal mode entry point
 ├── agent.ts           # Persistent streaming agent session
-│                        - Session resume across restarts
+│                        - Session resume across restarts (preserves context)
 │                        - YOLO risk classifier (LOW/MEDIUM/HIGH tool calls)
 │                        - Coordinator subagents (researcher/implementer/verifier)
-│                        - Context compaction detection
+│                        - Context compaction (proactive every 50 turns)
+│                        - Memory extraction after conversations
+│                          · Cursor tracking (every 3 turns)
+│                          · Coalescing (stash-and-trail pattern)
+│                          · Mutual exclusion with main agent writes
+│                        - Auto-recovery: compaction + resume, not session nuke
+│                        - 30s progress summaries for long-running tasks
 ├── bot.ts             # Discord bot
 │                        - Message → agent → reply
 │                        - Image input (base64) and file output (attachments)
@@ -63,30 +73,50 @@ src/
 │                        - Frustration detection (adapts tone)
 │                        - User presence tracking (idle/active)
 │                        - Proactive channel routing
+│                        - Token budget syntax (+500k, use 2M tokens)
+│                        - !teleport — context transfer to CLI
+│                        - !status — agent health info
 ├── voice.ts           # Discord voice channel
 │                        - !join / !leave commands
 │                        - Speech-to-text (Whisper)
 │                        - Text-to-speech (Edge TTS, Andrew voice)
 │                        - Transcripts posted to text channel
 ├── scheduler.ts       # Cron task scheduler
-│                        - 17 scheduled tasks (daily/3-day/weekly)
+│                        - 20 scheduled tasks (daily/3-day/weekly)
 │                        - Self-healing (diagnose → fix → retry, max 2 attempts)
+│                        - Circuit breaker (3 failures → 30min cooldown)
+│                        - Missed task detection on startup (max 3, staggered)
+│                        - Session registry (prevents duplicate execution)
 │                        - Task result tracking (skip already-completed tasks)
-│                        - Dream cycle (3:07 AM memory consolidation)
 │                        - Tick-based autonomous loop (every 5 min)
 │                        - Outcome checker (every 6h)
 │                        - Initiative review (every 2h)
 │                        - Heartbeat (every 60s)
+├── dream.ts           # LLM-driven memory consolidation (3:07 AM)
+│                        - 4-phase: Orient → Gather → Consolidate → Prune
+│                        - Forked as isolated task ($3 budget, 20 turns)
+│                        - PID-based lock with stale detection
+│                        - Tool-constrained (read-only bash, memory-dir writes)
+├── patterns.ts        # Reusable reliability patterns
+│                        - AsyncQueue — sequential execution for shared state
+│                        - CircuitBreaker — stop after N consecutive failures
+│                        - SessionRegistry — track active sessions, prevent dupes
+├── teleport.ts        # Context transfer between CLI and Koda
+│                        - Save: !teleport in Discord → ~/.koda/data/teleport.json
+│                        - Load: CLI reads file, Koda checks on startup
+├── runtime.ts         # Automatic runtime behaviors
+│                        - Auto-observe task results
+│                        - Auto-track outcomes after publishing
+│                        - Memory freshness warnings
+│                        - Observations capped at 500 lines
 ├── webhooks.ts        # GitHub webhook listener
 │                        - PR opened → agent reviews
 │                        - Issue opened → agent triages
 │                        - Push to main → agent checks impact
 ├── config.ts          # Environment, system prompt, agent defaults
+├── manifests.ts       # Plugin manifest loading
 └── tools/
-    ├── content-hub.ts # 7 typed MCP tools wrapping Python scripts
-    │                    - post_tweet, publish_video, generate_image
-    │                    - instagram_analytics, quote_tweet
-    │                    - scan_viral_tweets, skool_airtable_sync
+    ├── gsc.ts         # Google Search Console MCP server
     └── agent-tools.ts # 4 autonomous agent tools
                          - observe() — record patterns/facts for dream cycle
                          - propose_task() — self-initiate work
@@ -121,21 +151,38 @@ When the user is **idle** (no Discord activity for 15 min), autonomy increases �
 ### Memory System
 
 ```
-Agent works → records observations → data/observations.md
+Agent works → records observations → data/observations.md (capped at 500 lines)
                                           ↓
-Dream cycle (3:07 AM) → consolidate → promote patterns → data/LEARNINGS.md
-                       → expire old     → prune to 100 lines
-                       → deduplicate    → resolve contradictions
-                       → archive        → data/observations-archive.md
+Dream cycle (3:07 AM, LLM-driven) ──→ Phase 1: Orient (read learnings, goals, soul)
+                                     → Phase 2: Gather (grep observations, task results, logs)
+                                     → Phase 3: Consolidate (merge into learnings.md)
+                                     → Phase 4: Prune (TTL expiry, dedup, archive old)
+                                          ↓
+                                     ~/.koda/learnings.md (under 100 lines)
+
+Background extraction (every 3 turns):
+  Conversation → extractMemories agent → append to learnings.md
+  - Cursor tracking, coalescing, mutual exclusion with main agent
+  - Tool-constrained (read-only + learnings.md writes only)
 ```
+
+### Reliability Patterns
+
+- **Circuit breaker** — after 3 consecutive failures on the same task, stops retrying for 30 minutes
+- **Sequential queue** — shared state file writes (task results, observations) go through FIFO queue
+- **Session registry** — tracks active task sessions, prevents duplicate execution
+- **Missed task recovery** — on startup, recovers up to 3 most recent missed tasks, staggered 1 minute apart
+- **Auto-recovery** — on max_turns, compacts and resumes session (doesn't nuke context). On stream errors, tries resume before creating fresh session
 
 ### Self-Healing
 
 When a scheduled task fails:
 1. Error is captured and logged
-2. A heal prompt is sent to the agent with the error output
-3. Agent diagnoses, fixes scripts/configs, and retries
-4. Max 2 heal attempts before escalating to Discord
+2. Circuit breaker checks — if 3+ consecutive failures, stops for 30 minutes
+3. Retries up to 2 times with exponential backoff (5min, 10min)
+4. If all retries fail, a heal prompt is sent to the agent with the error output
+5. Agent diagnoses, fixes scripts/configs, and retries
+6. Max 2 heal attempts before escalating to Discord
 
 ### ULTRAPLAN
 
@@ -154,27 +201,46 @@ Three subagents for parallel work:
 
 ## Data Locations
 
-All data lives in `~/code/content-hub/data/`:
+All agent data lives in `~/.koda/`:
 
 | Path | What |
 |---|---|
-| `observations.md` | Raw observations recorded by the agent |
-| `observations-archive.md` | Expired observations |
-| `LEARNINGS.md` | Consolidated patterns (read at session start) |
-| `autonomous-logs/YYYY-MM-DD.log` | Daily task execution logs |
-| `daily-logs/YYYY-MM-DD.md` | Daily activity summaries |
-| `.task-results/YYYY-MM-DD.json` | Per-task success/failure tracking |
-| `.agent-initiatives.json` | Self-proposed tasks |
-| `outcomes/YYYY-MM-DD.json` | Content performance tracking |
-| `plans/plan-*.json` | ULTRAPLAN execution plans |
-| `drafts/` | Content drafts (tweets, articles, posts) |
-| `analytics/` | YouTube/Instagram/Bluesky snapshots |
-| `.koda-session-id` | Session ID for resume |
-| `.koda-heartbeat` | Health monitoring (PID + timestamp) |
+| `config.json` | Agent configuration (model, owner, social accounts) |
+| `tasks.json` | Scheduled task definitions (hot-reloaded on change) |
+| `mcp-servers.json` | External MCP server definitions |
+| `soul.md` | Agent personality and boundaries |
+| `user.md` | User profile |
+| `learnings.md` | Consolidated patterns (read at session start) |
+| `goals.md` | Active objectives |
+| `manifests/` | Plugin tool manifests |
+| `scripts/` | Helper scripts (dream-cycle.sh legacy fallback) |
+| `data/observations.md` | Raw observations (capped at 500 lines) |
+| `data/observations-archive.md` | Expired observations |
+| `data/autonomous-logs/YYYY-MM-DD.log` | Daily task execution logs |
+| `data/.task-results/YYYY-MM-DD.json` | Per-task success/failure tracking |
+| `data/.agent-initiatives.json` | Self-proposed tasks |
+| `data/outcomes/YYYY-MM-DD.json` | Content performance tracking |
+| `data/plans/plan-*.json` | ULTRAPLAN execution plans |
+| `data/sessions/` | Active session registry (prevents duplicates) |
+| `data/teleport.json` | Context transfer between CLI and Koda |
+| `data/.koda-session-id` | Session ID for resume |
+| `data/.koda-heartbeat` | Health monitoring (PID + timestamp) |
+| `data/.dream-lock` | Dream cycle lock (PID-based) |
 | `logs/koda-out.log` | pm2 stdout log |
 | `logs/koda-error.log` | pm2 stderr log |
 
 Conversation history is stored automatically by the Agent SDK in `~/.claude/` as JSONL session files.
+
+## Discord Commands
+
+| Command | What |
+|---|---|
+| `@Koda <message>` | Talk to the agent (or any message in allowed channels) |
+| `!status` | Show uptime, memory, PID |
+| `!teleport [note]` | Save agent context to `~/.koda/data/teleport.json` for CLI pickup |
+| `!join` / `!leave` | Voice channel |
+| `+500k <message>` | Extended token budget hint (also: `+2M`, `use 1M tokens`) |
+| React ✅/❌ | Approve or reject task proposals |
 
 ## Scheduled Tasks
 
@@ -190,19 +256,14 @@ Conversation history is stored automatically by the Agent SDK in `~/.claude/` as
 - Weekly report (Mon), lesson draft (Fri), voice profile refresh (Sat), Meta token check (Sun)
 
 ### System
-- Dream cycle: 3:07 AM daily
+- Dream cycle (LLM-driven): 3:07 AM daily ($3 budget cap)
+- Daily digest: 9 PM
+- Auto-backup: 3:08 AM (rsync to ~/.koda/backups/)
 - Outcome check: every 6 hours
 - Initiative review: every 2 hours
-- Tick loop: every 5 minutes
+- Tick loop: every 5 minutes (disabled by default)
 - Heartbeat: every 60 seconds
-
-## Commands
-
-### Discord
-- Regular messages → agent responds
-- `!join` — bot joins your voice channel
-- `!leave` — bot leaves voice channel
-- React with approve/reject on approval messages
+- Memory extraction: background, every 3 conversation turns
 
 ### Terminal
 ```bash
