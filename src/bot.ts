@@ -514,6 +514,7 @@ export class KodaBot {
     // Long response: create thread
     try {
       const channel = message.channel as TextChannel;
+      if (!channel.threads) throw new Error("Channel does not support threads");
       const thread = await channel.threads.create({
         name: `Koda — ${message.content.slice(0, 50)}`,
         type: ChannelType.PublicThread,
