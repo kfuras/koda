@@ -75,6 +75,10 @@ const HIGH_RISK_TOOLS = new Set([
   "mcp__gmail__gmail_send", "mcp__gmail__gmail_trash",
   "mcp__youtube__youtube_upload_video", "mcp__youtube__youtube_delete_video",
   "Write", "Edit", "Bash",
+  // Skill/plugin install tools — downloads and enables third-party code.
+  "mcp__agent-tools__install_clawhub_skill",
+  "mcp__agent-tools__install_claude_plugin",
+  "mcp__agent-tools__remove_skill",
 ]);
 
 const MEDIUM_RISK_TOOLS = new Set([

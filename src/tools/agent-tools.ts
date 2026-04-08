@@ -1,8 +1,10 @@
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { writeFile, readFile, mkdir, stat } from "node:fs/promises";
+import { writeFile, readFile, mkdir, stat, readdir, rm } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { KODA_HOME } from "../config.js";
 
 const execFileAsync = promisify(execFile);
@@ -310,10 +312,285 @@ const restartSelf = tool(
   },
 );
 
+// --- Skill / plugin install tools ---
+
+const KODA_SKILLS_DIR = `${KODA_HOME}/skills`;
+const CLAUDE_SKILLS_DIR = resolve(homedir(), ".claude/skills");
+const CLAUDE_PLUGINS_FILE = resolve(homedir(), ".claude/plugins/installed_plugins.json");
+
+/** Validate that a name is safe to use as a directory component (no traversal). */
+function safeName(name: string): boolean {
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/.test(name);
+}
+
+/** Minimal frontmatter parser — same logic as src/skills.ts but inlined here. */
+function parseFrontmatter(content: string): { meta: Record<string, string>; body: string } {
+  const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!match) return { meta: {}, body: content };
+  const meta: Record<string, string> = {};
+  for (const line of match[1].split("\n")) {
+    const idx = line.indexOf(":");
+    if (idx > 0) {
+      meta[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+    }
+  }
+  return { meta, body: match[2].trim() };
+}
+
+/** Extract required env vars from a ClawHub SKILL.md frontmatter if present. */
+function extractRequiredEnv(meta: Record<string, string>): string[] {
+  // ClawHub embeds metadata as a JSON blob on one line, e.g.:
+  // metadata: {"clawdbot":{"requires":{"env":["FOO","BAR"]}}}
+  const raw = meta.metadata;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    const env = parsed?.clawdbot?.requires?.env
+      ?? parsed?.openclaw?.requires?.env
+      ?? parsed?.clawdis?.requires?.env;
+    if (Array.isArray(env)) return env.filter((x): x is string => typeof x === "string");
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+const installClawhubSkill = tool(
+  "install_clawhub_skill",
+  "Install a skill from ClawHub / the openclaw/skills GitHub repo into ~/.koda/skills/. " +
+  "HIGH RISK — downloads third-party code that will run with Koda's full tool permissions. " +
+  "Only use when the user explicitly asks to install a skill. " +
+  "After successful install, call restart_self to activate the new skill. " +
+  "Reports back the skill metadata, any missing env var dependencies, and next-step instructions.",
+  {
+    author: z.string().describe("ClawHub author handle, e.g. 'kfuras' or '26medias'"),
+    name: z.string().describe("Skill name, e.g. 'notipo' or 'runware'"),
+  },
+  async ({ author, name }) => {
+    if (!safeName(author) || !safeName(name)) {
+      return textResult(
+        `ERROR: invalid author/name. Allowed: alphanumeric, dot, underscore, dash. ` +
+        `Got author='${author}' name='${name}'.`,
+      );
+    }
+
+    const targetDir = `${KODA_SKILLS_DIR}/${name}`;
+    const skillFile = `${targetDir}/SKILL.md`;
+    const url = `https://raw.githubusercontent.com/openclaw/skills/main/skills/${author}/${name}/SKILL.md`;
+
+    // Check if already installed
+    try {
+      await stat(skillFile);
+      return textResult(
+        `Skill '${name}' is already installed at ${skillFile}. ` +
+        `Use remove_skill first if you want to reinstall.`,
+      );
+    } catch {
+      // not installed — proceed
+    }
+
+    // Download SKILL.md
+    try {
+      await mkdir(targetDir, { recursive: true });
+      await execFileAsync("curl", ["-fsSL", url, "-o", skillFile]);
+    } catch (err) {
+      // Clean up empty directory on failure
+      try { await rm(targetDir, { recursive: true, force: true }); } catch {}
+      return textResult(
+        `ERROR: failed to download skill from ${url}\n` +
+        `${err instanceof Error ? err.message : String(err)}\n` +
+        `Check that the author and name are correct. Try: ` +
+        `https://github.com/openclaw/skills/tree/main/skills/${author}`,
+      );
+    }
+
+    // Parse the downloaded file to extract metadata and dependencies
+    const raw = await readFile(skillFile, "utf-8");
+    const { meta } = parseFrontmatter(raw);
+    const skillName = meta.name ?? name;
+    const description = meta.description ?? "(no description)";
+    const requiredEnv = extractRequiredEnv(meta);
+
+    // Check which required env vars are missing from the current process
+    const missingEnv = requiredEnv.filter(v => !process.env[v]);
+
+    const lines: string[] = [];
+    lines.push(`✓ Installed clawhub:${author}/${name}`);
+    lines.push(`  Name: ${skillName}`);
+    lines.push(`  Description: ${description}`);
+    lines.push(`  Path: ${skillFile}`);
+    if (requiredEnv.length > 0) {
+      lines.push(`  Required env vars: ${requiredEnv.join(", ")}`);
+      if (missingEnv.length > 0) {
+        lines.push(`  ⚠ MISSING env vars: ${missingEnv.join(", ")} — set these in ~/.koda/.env before using the skill.`);
+      } else {
+        lines.push(`  ✓ All required env vars are set.`);
+      }
+    }
+    lines.push("");
+    lines.push(
+      `Next step: call restart_self with reason "activate ${name} skill" ` +
+      `to reload the skill into the running session.`,
+    );
+
+    return textResult(lines.join("\n"));
+  },
+);
+
+const installClaudePlugin = tool(
+  "install_claude_plugin",
+  "Install a plugin from claude-plugins.dev (Claude Code plugins and Agent Skills) via the " +
+  "skills-installer CLI. HIGH RISK — installs third-party code. Only use when the user " +
+  "explicitly asks to install a plugin. After install, call restart_self to activate. " +
+  "The identifier format is '@scope/package/skill-name' or similar — see claude-plugins.dev.",
+  {
+    identifier: z.string().describe("Plugin identifier, e.g. '@anthropics/claude-code/frontend-design'"),
+    scope: z.enum(["personal", "project"]).default("personal")
+      .describe("'personal' installs to ~/.claude/, 'project' installs to the current project"),
+  },
+  async ({ identifier, scope }) => {
+    // Loose validation: allow @scope/package/name or just package-name
+    if (!/^[a-zA-Z0-9@][\w@/.-]{0,200}$/.test(identifier)) {
+      return textResult(`ERROR: invalid plugin identifier '${identifier}'.`);
+    }
+
+    const args = ["-y", "skills-installer", "install", identifier];
+    if (scope === "project") args.push("-p");
+    args.push("--client", "claude-code");
+
+    try {
+      const { stdout, stderr } = await execFileAsync("npx", args, { timeout: 120_000 });
+      const output = (stdout + "\n" + stderr).trim().slice(0, 2000);
+      return textResult(
+        `✓ Installed claude-plugin: ${identifier} (scope: ${scope})\n\n` +
+        `Installer output:\n${output}\n\n` +
+        `Next step: call restart_self with reason "activate ${identifier}" ` +
+        `to reload the plugin into Koda's session.`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return textResult(
+        `ERROR: skills-installer failed for '${identifier}'\n${msg.slice(0, 2000)}\n\n` +
+        `Check the identifier at https://claude-plugins.dev or try scope='project'.`,
+      );
+    }
+  },
+);
+
+const listInstalledSkills = tool(
+  "list_installed_skills",
+  "List all skills and plugins currently available to Koda, across all sources: " +
+  "Koda's own ~/.koda/skills/, Claude Code Agent Skills at ~/.claude/skills/, " +
+  "and Claude Code plugins from ~/.claude/plugins/installed_plugins.json. " +
+  "Read-only — safe to call anytime.",
+  {},
+  async () => {
+    const sections: string[] = [];
+
+    // ~/.koda/skills/
+    try {
+      const entries = await readdir(KODA_SKILLS_DIR, { withFileTypes: true });
+      const kodaSkills: string[] = [];
+      for (const e of entries) {
+        if (e.isFile() && e.name.endsWith(".md")) {
+          kodaSkills.push(`  - ${e.name.replace(/\.md$/, "")} (flat)`);
+        } else if (e.isDirectory()) {
+          try {
+            await stat(`${KODA_SKILLS_DIR}/${e.name}/SKILL.md`);
+            kodaSkills.push(`  - ${e.name} (directory, AgentSkills format)`);
+          } catch {
+            // directory without SKILL.md — skip
+          }
+        }
+      }
+      sections.push(`Koda skills (~/.koda/skills/) — ${kodaSkills.length} skills:`);
+      sections.push(kodaSkills.length > 0 ? kodaSkills.join("\n") : "  (none)");
+    } catch {
+      sections.push("Koda skills: directory not readable");
+    }
+
+    // ~/.claude/skills/
+    sections.push("");
+    try {
+      const entries = await readdir(CLAUDE_SKILLS_DIR, { withFileTypes: true });
+      const claudeSkills = entries.filter(e => e.isDirectory()).map(e => `  - ${e.name}`);
+      sections.push(`Claude Code Agent Skills (~/.claude/skills/) — ${claudeSkills.length} skills:`);
+      sections.push(claudeSkills.length > 0 ? claudeSkills.join("\n") : "  (none)");
+    } catch {
+      sections.push("Claude Code Agent Skills: directory not readable");
+    }
+
+    // ~/.claude/plugins/installed_plugins.json
+    sections.push("");
+    try {
+      const raw = await readFile(CLAUDE_PLUGINS_FILE, "utf-8");
+      const parsed = JSON.parse(raw) as { plugins?: Record<string, Array<{ version?: string }>> };
+      const plugins = Object.keys(parsed.plugins ?? {});
+      sections.push(`Claude Code plugins (claude-plugins.dev) — ${plugins.length} plugins:`);
+      sections.push(plugins.length > 0 ? plugins.map(p => `  - ${p}`).join("\n") : "  (none)");
+    } catch {
+      sections.push("Claude Code plugins: not readable");
+    }
+
+    return textResult(sections.join("\n"));
+  },
+);
+
+const removeSkill = tool(
+  "remove_skill",
+  "Remove a skill from ~/.koda/skills/. Works for both flat .md files and directory-based " +
+  "AgentSkills. HIGH RISK — deletes files. After removal, call restart_self to unload. " +
+  "Only removes Koda-local skills; use the claude-plugins CLI to remove Claude Code plugins.",
+  {
+    name: z.string().describe("Skill name (without .md extension)"),
+  },
+  async ({ name }) => {
+    if (!safeName(name)) {
+      return textResult(`ERROR: invalid skill name '${name}'. Refused to touch the filesystem.`);
+    }
+
+    const dirPath = `${KODA_SKILLS_DIR}/${name}`;
+    const flatPath = `${KODA_SKILLS_DIR}/${name}.md`;
+
+    let removed: string | null = null;
+    try {
+      await stat(dirPath);
+      await rm(dirPath, { recursive: true, force: true });
+      removed = dirPath;
+    } catch {
+      try {
+        await stat(flatPath);
+        await rm(flatPath, { force: true });
+        removed = flatPath;
+      } catch {
+        return textResult(
+          `Skill '${name}' not found at ${dirPath} or ${flatPath}. Nothing removed.`,
+        );
+      }
+    }
+
+    return textResult(
+      `✓ Removed skill '${name}' from ${removed}\n\n` +
+      `Next step: call restart_self with reason "unload ${name} skill" to fully unload from the running session.`,
+    );
+  },
+);
+
 // --- MCP Server ---
 
 export const agentToolsServer = createSdkMcpServer({
   name: "agent-tools",
   version: "0.1.0",
-  tools: [observe, proposeTask, trackOutcome, ultraplan, checkHealth, restartSelf],
+  tools: [
+    observe,
+    proposeTask,
+    trackOutcome,
+    ultraplan,
+    checkHealth,
+    restartSelf,
+    installClawhubSkill,
+    installClaudePlugin,
+    listInstalledSkills,
+    removeSkill,
+  ],
 });
