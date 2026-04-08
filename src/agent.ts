@@ -250,7 +250,12 @@ export class KodaAgent {
           },
         },
         cwd: CONTENT_HUB_DIR,
-        settingSources: ["project"],
+        // Load both user-level (~/.claude/) and project-level settings so Koda
+        // inherits the Claude Code plugin + Agent Skills ecosystem (compound-
+        // engineering, feature-dev, code-review, document-skills, n8n skills,
+        // etc) on top of Koda's own ~/.koda/skills/ layer. This is the same
+        // marketplace surface Claude Code has — one config flag unlocks it.
+        settingSources: ["user", "project"],
         ...(this.sessionId ? { resume: this.sessionId } : {}),
         mcpServers: getMcpServers(),
       },
@@ -310,7 +315,12 @@ export class KodaAgent {
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         cwd: CONTENT_HUB_DIR,
-        settingSources: ["project"],
+        // Load both user-level (~/.claude/) and project-level settings so Koda
+        // inherits the Claude Code plugin + Agent Skills ecosystem (compound-
+        // engineering, feature-dev, code-review, document-skills, n8n skills,
+        // etc) on top of Koda's own ~/.koda/skills/ layer. This is the same
+        // marketplace surface Claude Code has — one config flag unlocks it.
+        settingSources: ["user", "project"],
         mcpServers: getMcpServers(),
       },
     });

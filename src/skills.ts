@@ -3,16 +3,25 @@
  * and generates system prompt context so Koda follows recipes
  * instead of improvising.
  *
- * Skill format: markdown with YAML frontmatter
+ * Two supported formats:
+ *
+ * 1. Flat (legacy Koda format):
+ *    ~/.koda/skills/{skill-name}.md
+ *
+ * 2. Directory (AgentSkills / ClawHub / Claude Code format):
+ *    ~/.koda/skills/{skill-name}/SKILL.md
+ *    ~/.koda/skills/{skill-name}/scripts/...  (supporting files, not loaded)
+ *
+ * Both use the same frontmatter schema:
  * ---
  * name: skill-name
  * description: One-line description
- * when: When to use this skill (matched against user intent)
+ * when: When to use this skill (optional, Koda-specific trigger hint)
  * ---
  * Step-by-step instructions in markdown body.
  */
 
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 
@@ -44,22 +53,48 @@ function parseFrontmatter(content: string): { meta: Record<string, string>; body
   return { meta, body: match[2].trim() };
 }
 
+/** Resolve a skills dir entry to a SKILL.md path, or null if not a valid skill. */
+function resolveSkillFile(entry: string): string | null {
+  const fullPath = resolve(SKILLS_DIR, entry);
+  try {
+    const stat = statSync(fullPath);
+
+    // Flat format: ~/.koda/skills/foo.md
+    if (stat.isFile() && entry.endsWith(".md")) {
+      return fullPath;
+    }
+
+    // Directory format: ~/.koda/skills/foo/SKILL.md
+    // (AgentSkills spec — compatible with ClawHub and Claude Code Agent Skills)
+    if (stat.isDirectory()) {
+      const skillMd = resolve(fullPath, "SKILL.md");
+      if (existsSync(skillMd)) return skillMd;
+    }
+  } catch {
+    // Ignore stat errors (broken symlinks, race conditions)
+  }
+  return null;
+}
+
 export function loadSkills(): Skill[] {
   if (!existsSync(SKILLS_DIR)) {
     console.log(`[skills] No skills directory at ${SKILLS_DIR}`);
     return [];
   }
 
-  const files = readdirSync(SKILLS_DIR).filter(f => f.endsWith(".md"));
+  const entries = readdirSync(SKILLS_DIR);
   const skills: Skill[] = [];
 
-  for (const file of files) {
+  for (const entry of entries) {
+    const skillFile = resolveSkillFile(entry);
+    if (!skillFile) continue;
+
     try {
-      const raw = readFileSync(resolve(SKILLS_DIR, file), "utf-8");
+      const raw = readFileSync(skillFile, "utf-8");
       const { meta, body } = parseFrontmatter(raw);
 
       if (!meta.name || !body) {
-        console.warn(`[skills] Skipping ${file}: missing name or body`);
+        console.warn(`[skills] Skipping ${entry}: missing name or body`);
         continue;
       }
 
@@ -68,10 +103,10 @@ export function loadSkills(): Skill[] {
         description: meta.description ?? "",
         when: meta.when ?? "",
         body,
-        filename: file,
+        filename: entry,
       });
     } catch (err) {
-      console.error(`[skills] Failed to load ${file}:`, err instanceof Error ? err.message : err);
+      console.error(`[skills] Failed to load ${entry}:`, err instanceof Error ? err.message : err);
     }
   }
 
