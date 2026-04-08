@@ -26,7 +26,7 @@ npm run daemon
 - Node.js 18+
 - Claude CLI logged in (Max subscription — no API key needed)
 - Claude Agent SDK 0.2.x (`@anthropic-ai/claude-agent-sdk`)
-- Python 3 (for content-hub scripts)
+- Python 3 (for scripts in `~/.koda/scripts/`)
 - ffmpeg, whisper, edge-tts (for voice channel support)
 - pm2 (`npm install -g pm2`) for daemon mode
 

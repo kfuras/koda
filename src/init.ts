@@ -64,9 +64,6 @@ DISCORD_ALLOWED_CHANNELS=
 DISCORD_PROACTIVE_CHANNEL=
 DISCORD_ALLOWED_USERS=
 
-# Content hub (path to your content scripts/pipeline)
-CONTENT_HUB_DIR=
-
 # Social (set these in ~/.secrets.zsh or here)
 # X_CONSUMER_KEY=
 # X_CONSUMER_SECRET=
