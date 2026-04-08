@@ -355,13 +355,69 @@ function extractRequiredEnv(meta: Record<string, string>): string[] {
   return [];
 }
 
+/** Recursively download a directory from the openclaw/skills GitHub repo via the API. */
+interface GitHubContentItem {
+  name: string;
+  path: string;
+  type: "file" | "dir" | "symlink" | "submodule";
+  size: number;
+  download_url: string | null;
+}
+
+async function downloadGitHubDir(
+  apiPath: string,
+  localDir: string,
+): Promise<{ files: string[]; totalBytes: number; executables: string[] }> {
+  const files: string[] = [];
+  const executables: string[] = [];
+  let totalBytes = 0;
+
+  const listUrl = `https://api.github.com/repos/openclaw/skills/contents/${apiPath}`;
+  const { stdout } = await execFileAsync(
+    "curl",
+    ["-fsSL", "-H", "Accept: application/vnd.github+json", listUrl],
+    { maxBuffer: 10 * 1024 * 1024 },
+  );
+  const items: GitHubContentItem[] = JSON.parse(stdout);
+
+  await mkdir(localDir, { recursive: true });
+
+  for (const item of items) {
+    const localPath = `${localDir}/${item.name}`;
+
+    if (item.type === "file" && item.download_url) {
+      // Skip files larger than 1 MB to avoid pulling models/large binaries
+      if (item.size > 1024 * 1024) {
+        continue;
+      }
+      await execFileAsync("curl", ["-fsSL", item.download_url, "-o", localPath]);
+      files.push(item.path);
+      totalBytes += item.size;
+      if (/\.(sh|py|js|ts|mjs|cjs|rb|pl)$/i.test(item.name)) {
+        executables.push(item.path);
+      }
+    } else if (item.type === "dir") {
+      // Recurse
+      const sub = await downloadGitHubDir(item.path, localPath);
+      files.push(...sub.files);
+      executables.push(...sub.executables);
+      totalBytes += sub.totalBytes;
+    }
+    // skip symlinks and submodules
+  }
+
+  return { files, totalBytes, executables };
+}
+
 const installClawhubSkill = tool(
   "install_clawhub_skill",
   "Install a skill from ClawHub / the openclaw/skills GitHub repo into ~/.koda/skills/. " +
-  "HIGH RISK — downloads third-party code that will run with Koda's full tool permissions. " +
-  "Only use when the user explicitly asks to install a skill. " +
-  "After successful install, call restart_self to activate the new skill. " +
-  "Reports back the skill metadata, any missing env var dependencies, and next-step instructions.",
+  "Downloads the FULL skill directory (SKILL.md + any bundled scripts, hooks, references, " +
+  "assets, etc), preserving the structure. HIGH RISK — downloads third-party code that will " +
+  "run with Koda's full tool permissions. Only use when the user explicitly asks to install " +
+  "a skill. After successful install, call restart_self to activate. Reports metadata, " +
+  "missing env vars, total bytes downloaded, and a list of any executable files bundled " +
+  "(so the user can audit before activation).",
   {
     author: z.string().describe("ClawHub author handle, e.g. 'kfuras' or '26medias'"),
     name: z.string().describe("Skill name, e.g. 'notipo' or 'runware'"),
@@ -376,7 +432,6 @@ const installClawhubSkill = tool(
 
     const targetDir = `${KODA_SKILLS_DIR}/${name}`;
     const skillFile = `${targetDir}/SKILL.md`;
-    const url = `https://raw.githubusercontent.com/openclaw/skills/main/skills/${author}/${name}/SKILL.md`;
 
     // Check if already installed
     try {
@@ -389,36 +444,72 @@ const installClawhubSkill = tool(
       // not installed — proceed
     }
 
-    // Download SKILL.md
+    // Download the full directory recursively from GitHub
+    let download: { files: string[]; totalBytes: number; executables: string[] };
     try {
-      await mkdir(targetDir, { recursive: true });
-      await execFileAsync("curl", ["-fsSL", url, "-o", skillFile]);
+      download = await downloadGitHubDir(
+        `skills/${author}/${name}`,
+        targetDir,
+      );
     } catch (err) {
-      // Clean up empty directory on failure
       try { await rm(targetDir, { recursive: true, force: true }); } catch {}
       return textResult(
-        `ERROR: failed to download skill from ${url}\n` +
-        `${err instanceof Error ? err.message : String(err)}\n` +
-        `Check that the author and name are correct. Try: ` +
-        `https://github.com/openclaw/skills/tree/main/skills/${author}`,
+        `ERROR: failed to download skill 'clawhub:${author}/${name}'\n` +
+        `${err instanceof Error ? err.message : String(err)}\n\n` +
+        `Check that the skill exists at: ` +
+        `https://github.com/openclaw/skills/tree/main/skills/${author}/${name}`,
       );
     }
 
-    // Parse the downloaded file to extract metadata and dependencies
+    // Verify SKILL.md was actually downloaded
+    try {
+      await stat(skillFile);
+    } catch {
+      try { await rm(targetDir, { recursive: true, force: true }); } catch {}
+      return textResult(
+        `ERROR: download completed but no SKILL.md found. ` +
+        `The directory at skills/${author}/${name} may not be a valid skill.`,
+      );
+    }
+
+    // Parse SKILL.md to extract metadata and dependencies
     const raw = await readFile(skillFile, "utf-8");
-    const { meta } = parseFrontmatter(raw);
+    const { meta, body } = parseFrontmatter(raw);
     const skillName = meta.name ?? name;
     const description = meta.description ?? "(no description)";
     const requiredEnv = extractRequiredEnv(meta);
-
-    // Check which required env vars are missing from the current process
     const missingEnv = requiredEnv.filter(v => !process.env[v]);
+
+    // OpenClaw-runtime red-flag detection — surface if the skill is likely
+    // to need features Koda doesn't have
+    const openclawRedFlags: string[] = [];
+    if (/OpenClaw is the primary platform/i.test(body)) {
+      openclawRedFlags.push("says 'OpenClaw is the primary platform'");
+    }
+    if (/workspace-based prompt injection/i.test(body)) {
+      openclawRedFlags.push("expects workspace-based prompt injection");
+    }
+    if (/\bAGENTS\.md\b|\bTOOLS\.md\b/.test(body)) {
+      openclawRedFlags.push("references OpenClaw workspace files (AGENTS.md / TOOLS.md)");
+    }
+    if (/clawdhub install|~\/\.openclaw\//.test(body)) {
+      openclawRedFlags.push("references OpenClaw install paths");
+    }
 
     const lines: string[] = [];
     lines.push(`✓ Installed clawhub:${author}/${name}`);
     lines.push(`  Name: ${skillName}`);
     lines.push(`  Description: ${description}`);
-    lines.push(`  Path: ${skillFile}`);
+    lines.push(`  Path: ${targetDir}/`);
+    lines.push(`  Downloaded: ${download.files.length} files, ${Math.round(download.totalBytes / 1024)}KB`);
+
+    if (download.executables.length > 0) {
+      lines.push(`  ⚠ Bundled executables (audit before activation):`);
+      for (const exe of download.executables) {
+        lines.push(`    - ${exe}`);
+      }
+    }
+
     if (requiredEnv.length > 0) {
       lines.push(`  Required env vars: ${requiredEnv.join(", ")}`);
       if (missingEnv.length > 0) {
@@ -426,6 +517,14 @@ const installClawhubSkill = tool(
       } else {
         lines.push(`  ✓ All required env vars are set.`);
       }
+    }
+
+    if (openclawRedFlags.length > 0) {
+      lines.push(`  ⚠ OpenClaw-runtime red flags detected:`);
+      for (const flag of openclawRedFlags) {
+        lines.push(`    - ${flag}`);
+      }
+      lines.push(`    This skill may only partially work in Koda. Review the SKILL.md body before activation.`);
     }
     lines.push("");
     lines.push(
