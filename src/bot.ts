@@ -170,17 +170,63 @@ export class KodaBot {
     await this.client.login(DISCORD_BOT_TOKEN);
   }
 
-  async sendStartupMessage(): Promise<void> {
-    const channelId = DISCORD_ALLOWED_CHANNELS.values().next().value;
-    if (!channelId) return;
+  async sendStartupMessage(reason?: string): Promise<void> {
+    // Fall through the same channel hierarchy as sendProactive so that
+    // startup messages reach wherever the operator expects announcements.
+    // If nothing resolves, log loudly instead of silently returning —
+    // silent failure is what hid this bug in the first place.
+    const channelId =
+      DISCORD_PROACTIVE_CHANNEL ||
+      DISCORD_ALLOWED_CHANNELS.values().next().value;
+    if (!channelId) {
+      console.error(
+        "[startup] No channel configured. Set DISCORD_PROACTIVE_CHANNEL or " +
+        "DISCORD_ALLOWED_CHANNELS in ~/.koda/.env. Startup message NOT sent.",
+      );
+      return;
+    }
+
+    // Count skills from ~/.koda/skills/ for the status line
+    let skillCount = 0;
+    try {
+      const { readdirSync, statSync, existsSync: exists } = await import("node:fs");
+      const skillsDir = resolve(KODA_HOME, "skills");
+      if (exists(skillsDir)) {
+        const entries = readdirSync(skillsDir);
+        for (const entry of entries) {
+          const full = resolve(skillsDir, entry);
+          const st = statSync(full);
+          if (st.isFile() && entry.endsWith(".md")) {
+            skillCount++;
+          } else if (st.isDirectory() && exists(resolve(full, "SKILL.md"))) {
+            skillCount++;
+          }
+        }
+      }
+    } catch {
+      // Skill counting is best-effort — don't block the startup message on it
+    }
+
+    // Build the message
+    const lines: string[] = [];
+    lines.push("**Koda online.**");
+    if (reason) {
+      lines.push(`Reason: ${reason}`);
+    }
+    lines.push(`${skillCount} skills loaded. Ready for tasks.`);
 
     try {
       const channel = await this.client.channels.fetch(channelId) as TextChannel | null;
       if (channel) {
-        await channel.send("Koda online. Ready for tasks.");
+        await channel.send(lines.join("\n"));
+      } else {
+        console.error(
+          `[startup] Channel ${channelId} not found or not text-based. ` +
+          `Check DISCORD_PROACTIVE_CHANNEL / DISCORD_ALLOWED_CHANNELS.`,
+        );
       }
     } catch (err) {
-      console.error("Failed to send startup message:", err);
+      console.error("[startup] Failed to send startup message:", err);
     }
   }
 

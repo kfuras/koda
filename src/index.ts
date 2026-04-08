@@ -1,4 +1,5 @@
 import { watch } from "node:fs";
+import { readFile, unlink } from "node:fs/promises";
 import { resolve } from "node:path";
 import { KodaAgent } from "./agent.js";
 import { KodaBot } from "./bot.js";
@@ -8,6 +9,23 @@ import { setupVoiceCommands } from "./voice.js";
 import { KODA_HOME } from "./config.js";
 import { checkIncomingTeleport } from "./teleport.js";
 import { checkMemoryFreshness } from "./runtime.js";
+
+/**
+ * Read the restart reason persisted by restart_self, if any.
+ * Returns the reason string and deletes the file so the next cold start
+ * doesn't include stale info.
+ */
+async function consumeRestartReason(): Promise<string | undefined> {
+  const file = resolve(KODA_HOME, "data/.last-restart.json");
+  try {
+    const raw = await readFile(file, "utf-8");
+    const payload = JSON.parse(raw) as { reason?: string };
+    await unlink(file).catch(() => {}); // best-effort cleanup
+    return payload.reason;
+  } catch {
+    return undefined;
+  }
+}
 
 // --- Hot-reload file watcher ---
 
@@ -91,8 +109,11 @@ async function main() {
     );
   }
 
-  // 8. Announce we're online
-  await bot.sendStartupMessage();
+  // 8. Announce we're online — include the restart reason if one was persisted
+  //    by restart_self, and surface skill count so the operator has visible
+  //    feedback that the restart completed and the new state loaded.
+  const restartReason = await consumeRestartReason();
+  await bot.sendStartupMessage(restartReason);
 
   // 8. Hot-reload config files (tasks.json, mcp-servers.json)
   startFileWatcher(bot);

@@ -291,15 +291,38 @@ const checkHealth = tool(
   },
 );
 
+const LAST_RESTART_FILE = `${KODA_HOME}/data/.last-restart.json`;
+
 const restartSelf = tool(
   "restart_self",
   "Restart the Koda pm2 process. Use after config changes or to recover from errors. " +
-  "WARNING: this will interrupt the current session. Only use if necessary.",
+  "WARNING: this will interrupt the current session. Only use if necessary. " +
+  "The reason is persisted to disk and surfaced in the next startup message so " +
+  "the user knows why Koda restarted.",
   {
     reason: z.string().describe("Why the restart is needed"),
   },
   async ({ reason }) => {
     console.log(`[agent-tools] restart_self called: ${reason}`);
+
+    // Persist the reason so the next startup message can include it.
+    // The new process reads this file in src/index.ts, posts a startup
+    // message with the reason, then deletes the file.
+    try {
+      await mkdir(`${KODA_HOME}/data`, { recursive: true });
+      await writeFile(
+        LAST_RESTART_FILE,
+        JSON.stringify({
+          reason,
+          timestamp: new Date().toISOString(),
+        }, null, 2),
+      );
+    } catch (err) {
+      console.error("[agent-tools] failed to persist restart reason:", err);
+      // Continue with restart anyway — worst case, the startup message
+      // just won't include a reason.
+    }
+
     // Delay slightly so the tool result can be returned before the process dies
     setTimeout(async () => {
       try {
