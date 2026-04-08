@@ -347,6 +347,28 @@ async function sendDailyDigest(agent: KodaAgent, bot: KodaBot): Promise<void> {
     `observations recorded, content drafted, API spend, and anything that needs attention tomorrow.\n` +
     `Keep it under 1500 characters.`,
     async (responseText) => {
+      // Layer 4 of the 6-layer memory pipeline: persist the digest as a daily log
+      // so the morning learnings_review task has fresh material to consolidate
+      // into LEARNINGS.md. Without this, learnings_review reads stale files
+      // every day and produces no new learnings (the circuit was broken after
+      // the March 2026 TypeScript rewrite — this restores it).
+      try {
+        const logDir = resolve(KODA_HOME, "data/daily-logs");
+        await mkdir(logDir, { recursive: true });
+        const logPath = resolve(logDir, `${date}.md`);
+        await writeFile(
+          logPath,
+          `# Daily Log — ${date}\n\n${responseText}\n`,
+          "utf-8",
+        );
+        console.log(`[digest] Wrote daily log: ${logPath}`);
+      } catch (err) {
+        console.error(
+          `[digest] Failed to write daily log:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+
       await bot.sendProactive(`**[Daily Digest — ${date}]**\n\n${responseText}`);
     },
   );
