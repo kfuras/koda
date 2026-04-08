@@ -2,33 +2,182 @@
 
 Autonomous marketing and operations agent built on Anthropic's Claude Agent SDK. Replaces the old `claude-daemon.py` with a proper autonomous loop: gather context, think, act, observe, repeat.
 
-## Quick Start
+## Install
+
+### Quick install (recommended)
 
 ```bash
-# Install dependencies
+cd ~/wherever-you-want-koda-to-live
+curl -fsSL https://raw.githubusercontent.com/kfuras/koda/main/install.sh | bash
+```
+
+This creates a `koda` subdirectory at your current location. **You pick the parent directory by cd-ing first.**
+
+Examples:
+```bash
+cd ~/code         # creates ~/code/koda/
+cd ~/projects     # creates ~/projects/koda/
+cd /opt           # creates /opt/koda/ (may need write permissions)
+```
+
+After the script finishes, you'll have a global `koda` command in your PATH.
+
+### What the install script does
+
+Before running `curl | bash`, read what the script will do to your system. The full source is at [`install.sh`](install.sh) — audit it before piping to bash if you want.
+
+The script will:
+
+1. **Detect your OS** (macOS or Linux; fails on Windows)
+2. **Install missing prerequisites** (see the next section for the exact commands)
+3. **Clone `kfuras/koda`** to `$PWD/koda` (or pull if already cloned)
+4. **Run `npm install`**
+5. **Run `npm run build`** (compiles TypeScript to `dist/`)
+6. **Run `npm link`** (creates a global `koda` binary)
+7. **Run `koda doctor`** to validate the install
+8. **Restart the Koda daemon** if it was already running via pm2
+
+The script will **NOT**:
+
+- Modify your shell rc files (`.zshrc`, `.bashrc`, etc.)
+- Run `sudo` on macOS
+- Touch `~/.koda/` (your config and state stay untouched on install or reinstall)
+- Install to `/usr/local/bin` directly (uses `npm link` which respects your npm prefix)
+
+### Prerequisites the script will install if missing
+
+**macOS** (via Homebrew):
+```bash
+# Homebrew itself (if missing)
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Node.js 22 (if node missing or <18)
+brew install node@22 && brew link --force --overwrite node@22
+
+# Git (if missing)
+brew install git
+
+# pm2 (if missing)
+npm install -g pm2
+```
+
+**Linux** (via package manager):
+```bash
+# Debian/Ubuntu
+sudo apt-get update && sudo apt-get install -y nodejs npm git
+sudo npm install -g pm2
+
+# Fedora/RHEL
+sudo dnf install -y nodejs npm git
+sudo npm install -g pm2
+```
+
+### Install flags
+
+```bash
+./install.sh --dry-run        # show what would happen, make no changes
+./install.sh --skip-prereqs   # assume tools are already installed
+./install.sh --no-onboard     # skip `koda doctor` (for CI/automation)
+./install.sh --help           # show full help
+```
+
+### Manual install (no script)
+
+If you'd rather not run a shell script from the internet:
+
+```bash
+# 1. Install prerequisites yourself (Node 18+, git, pm2)
+brew install node@22 git
+npm install -g pm2
+
+# 2. Clone to wherever you want
+git clone https://github.com/kfuras/koda.git ~/your/chosen/path
+cd ~/your/chosen/path
+
+# 3. Build and link
 npm install
+npm run build
+npm link
 
-# Copy and fill in your env vars
-cp .env.example .env
+# 4. Verify
+koda --version
+koda doctor
+```
 
-# Development (foreground, stops when terminal closes)
-npm run dev
+### What gets created where
 
-# CLI mode (terminal conversation, works over SSH)
-npm run cli
+```
+<wherever-you-cloned>/koda/    ← code repo (you choose this path)
+  ├── src/                     ← TypeScript source
+  ├── dist/                    ← compiled output
+  │   └── koda.js              ← CLI entry point (symlinked by npm link)
+  ├── install.sh               ← the installer
+  └── package.json
 
-# Production daemon (background, survives reboots)
-npm run daemon
+$(npm config get prefix)/bin/koda   ← global symlink
+  (on macOS with Homebrew: /opt/homebrew/bin/koda,
+   on older Macs or Linux: /usr/local/bin/koda)
+
+~/.koda/                       ← user state/config (NOT touched by install)
+  ├── .env                     ← API keys, Discord tokens, channel IDs
+  ├── config.json              ← agent config (name, model, budgets)
+  ├── soul.md                  ← identity
+  ├── user.md                  ← who you are
+  ├── goals.md, learnings.md   ← memory layers 1 & 5
+  ├── skills/                  ← skills (native + ClawHub installs)
+  ├── data/                    ← observations, drafts, daily logs, sessions
+  └── logs/                    ← daemon logs
+```
+
+### Updating an existing install
+
+```bash
+koda update              # pull + install + build + doctor + restart
+koda update --dry-run    # preview what would change
+```
+
+See `koda --help` for all commands.
+
+### Uninstalling
+
+```bash
+# Unlink the global binary
+cd <wherever-you-cloned>/koda && npm unlink
+
+# Stop the daemon
+pm2 delete koda
+
+# Remove the code (optional)
+rm -rf <wherever-you-cloned>/koda
+
+# DESTRUCTIVE: remove user state (wipes config, skills, memory, logs)
+# Only do this if you're absolutely done with Koda.
+rm -rf ~/.koda
 ```
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 18+ (script can install Node 22 via Homebrew on macOS, package manager on Linux)
 - Claude CLI logged in (Max subscription — no API key needed)
 - Claude Agent SDK 0.2.x (`@anthropic-ai/claude-agent-sdk`)
 - Python 3 (for scripts in `~/.koda/scripts/`)
-- ffmpeg, whisper, edge-tts (for voice channel support)
-- pm2 (`npm install -g pm2`) for daemon mode
+- ffmpeg, whisper, edge-tts (for voice channel support — optional)
+- pm2 (script auto-installs via `npm install -g pm2`)
+
+## CLI commands
+
+```bash
+koda status     # show daemon state, skills, memory freshness
+koda update     # pull latest code, rebuild, restart
+koda logs       # tail the daemon logs
+koda restart    # restart with an optional reason
+koda doctor     # check configuration for drift against the schema
+koda skills     # list installed skills across all sources
+koda health     # health check
+koda --help     # full command list
+```
+
+See `koda <command> --help` for command-specific options.
 
 ## Environment Variables
 
