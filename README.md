@@ -158,11 +158,50 @@ rm -rf ~/.koda
 ## Requirements
 
 - Node.js 18+ (script can install Node 22 via Homebrew on macOS, package manager on Linux)
-- Claude CLI logged in (Max subscription — no API key needed)
+- Claude Code CLI logged in (see "Authenticating with Anthropic" below)
 - Claude Agent SDK 0.2.x (`@anthropic-ai/claude-agent-sdk`)
 - Python 3 (for scripts in `~/.koda/scripts/`)
 - ffmpeg, whisper, edge-tts (for voice channel support — optional)
 - pm2 (script auto-installs via `npm install -g pm2`)
+
+## Authenticating with Anthropic
+
+Koda uses the Claude Agent SDK, which authenticates one of two ways:
+
+### Path A — Max subscription (recommended for solo operators)
+
+Install Claude Code CLI and log in once. Koda reads the credentials automatically.
+
+```bash
+# Install Claude Code CLI (separate from Koda)
+npm install -g @anthropic-ai/claude-code
+
+# Log in with your Max subscription
+claude
+# (first run opens a browser for OAuth)
+
+# Verify you're logged in
+claude --version
+```
+
+That's it — Koda picks up the session from `~/.claude/` transparently. **No `ANTHROPIC_API_KEY` needed.**
+
+### Path B — API key (for servers / non-interactive / pay-per-use)
+
+If you don't have (or don't want to use) a Max subscription, set an API key in `~/.koda/.env`:
+
+```bash
+# In ~/.koda/.env
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+The Agent SDK picks up `ANTHROPIC_API_KEY` if set, falling back to Claude Code CLI login otherwise. Useful for headless servers where you can't run an interactive OAuth flow.
+
+### Important: Max + Koda is allowed
+
+As of April 2026, Anthropic blocks Claude subscriptions from powering certain third-party "harnesses" (like OpenClaw). **Koda is not in that category** — it uses the Agent SDK directly rather than wrapping Claude Code. Anthropic has explicitly confirmed that "nothing is changing about how you can use the Agent SDK and MAX subscriptions" (Anthropic engineer Thariq Shihipar, The New Stack, April 2026).
+
+So if you're using Max sub with Koda, you're on the explicitly-blessed path.
 
 ## First-run setup
 
