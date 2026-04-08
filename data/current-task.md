@@ -1,93 +1,61 @@
-# Koda Agent — Current State (Updated 2026-04-05 19:30)
+# Koda Agent — Current State (Updated 2026-04-06 00:15)
 
 ## Status: Live in Production (pm2 daemon, Koda#8323)
 
-## NEXT SESSION: Move scripts and servers to ~/.koda/
+## NEXT SESSION: Add skills system to Koda
 
-The installed app should live entirely in ~/.koda/. Content-hub should only have Remotion video pipeline stuff.
+Use the Claude Code skill creator skill to create Koda skills.
+Skills = step-by-step workflow instructions in markdown files at ~/.koda/skills/
+Loaded into system prompt like manifests. Koda follows the recipe instead of improvising.
 
-### What to move from ~/code/content-hub/ to ~/.koda/:
-- scripts/*.py → ~/.koda/scripts/ (post_x.py, scan_viral_tweets.py, publish.py, quote_tweet_web.py, search_reaction_clip.py, instagram_analytics.py, cta_reply.py, generate_image.py, generate_thumbnail.py, trending_topics.py, refresh_meta_token.py, research_topics.py, skool-airtable-sync.py)
-- servers/*.py → ~/.koda/servers/ (content_hub_mcp_server.py, x_mcp_server.py)
-- data/brand-voice-skill.md → ~/.koda/brand-voice-skill.md
-- data/drafts/ → ~/.koda/data/drafts/
-- data/analytics/ → ~/.koda/data/analytics/
-- data/x-feed/ → ~/.koda/data/x-feed/
-- data/voice-profile.json → ~/.koda/data/voice-profile.json
+### Skills to create:
+1. delete-wordpress-post — use Notipo API to get WP credentials, then WP REST API to delete
+2. publish-blog-post — GSC keyword research → draft → Notipo CLI to publish
+3. Any other common operations where Koda improvises instead of following a known path
 
-### What stays in ~/code/content-hub/:
-- video/ (Remotion pipeline, compositions, builds)
-- video skills/docs
-- .gitignore, package.json for Remotion
+### Reference:
+- Claude Code skills spec: ~/code/claurst/spec/11_special_systems.md (line 997+)
+- Skill format: markdown with frontmatter (name, description, when-to-use, allowed-tools)
+- Manifests system (existing): src/manifests.ts — similar pattern to follow
 
-### After moving:
-- Update mcp-servers.json to point to ~/.koda/servers/
-- Update manifests to point to ~/.koda/scripts/
-- Update content_hub_mcp_server.py SCRIPTS_DIR
-- Symlink .env is already in ~/.koda/.env
-- Test everything still works
+## Completed this session
 
-### Final structure:
-```
-~/.koda/                    ← the installed app
-├── .env                    ← all API keys
-├── config.json             ← agent config
-├── soul.md, user.md        ← identity
-├── learnings.md, goals.md  ← knowledge
-├── brand-voice-skill.md    ← content voice rules
-├── scripts/                ← Python automation scripts
-├── servers/                ← MCP servers (Python)
-├── manifests/              ← plugin manifests with tool docs
-├── mcp-servers.json        ← MCP server registry
-├── data/                   ← drafts, analytics, x-feed, observations, outcomes
-└── logs/
+### 10 Claude Code patterns
+- Sequential queue, circuit breaker, missed task detection, session registry
+- Memory extraction (cursor, coalescing, mutual exclusion)
+- Token budget syntax, hot-reload, progress summaries, teleport
 
-~/code/koda/                ← source code repo (open-sourceable, no personal data)
-├── src/                    ← TypeScript agent runtime
-├── templates/              ← init templates for new users
-└── package.json
+### Dream cycle rewrite
+- Bash+python → LLM-driven TypeScript (src/dream.ts)
+- 4-phase: Orient → Gather → Consolidate → Prune
 
-~/code/content-hub/         ← Remotion video pipeline only
-├── video/                  ← compositions, builds, assets
-└── package.json
-```
+### Audit fixes (verified against leaked source + Claurst specs)
+- Auto-recovery preserves session (no more nuking context)
+- extractMemories with cursor, coalescing, mutual exclusion
+- Tool permission constraints on extractMemories and dream
+- Freshness warnings, memory feedback, mutual exclusion with main agent
 
-## Completed This Session (massive)
-- Tick loop disabled ($58/day → $0)
-- Reaction clips: YouTube + yt-dlp replacing GIPHY
-- Brand voice: WRONG vs RIGHT examples, reader-focused, weekly learning
-- X/Bluesky autonomous posting
-- Skool content calendar (10 posts, self-replenishing)
-- GSC → blog post ideas
-- publish.py env vars fix
-- Notipo fix (NOTIPO_API_KEY, NOTIPO_URL)
-- Auto-recovery on max_turns
-- Isolated task sessions with per-task limits
-- Task retry with backoff
-- Daily budget cap $50
-- Context compaction every 50 turns
-- Task chaining
-- Health endpoint GET :3847/health
-- Conversation memory task
-- Plugin architecture (external MCP, auto-runtime, manifests)
-- Notipo full API docs in manifest
-- ~/.koda/ home directory (OpenClaw-style)
-- Open-source ready (zero personal data in source)
-- Single .env at ~/.koda/.env (symlinked from content-hub)
-- koda init command
-- Skool Airtable sync: full CSV data, churned marking
-- 48 old Skool members marked Churned
-- Koda GitHub repo created (private)
-- OpenClaw analysis and architectural improvements
+### Bug fixes
+- SDK update 0.1.77 → 0.2.92 (fixed startup crashes)
+- Compaction loop fix (num_turns was cumulative, not per-response)
+- Credential redaction in YOLO logger
+- Missed task recovery: cap at 3, approval tasks first, staggered
+- System prompt guardrails: use configured keys first, never hunt credentials
+
+### New features
+- !tasks command (shows schedule + today's status)
+- blog_post task (SEO, GSC keyword targeting, every 3 days)
+- Git history restored (42 commits, no personal data)
+
+### Analysis
+- Claurst: Rust port with detailed specs at ~/code/claurst/spec/
+- Claw Code: Different Rust port with recovery recipes + policy engine
+- Claude Code leak: yasasbanukaofficial/claude-code — authoritative source
+- Compared all Koda implementations against leak, fixed what was wrong
 
 ## Architecture
-- Source: ~/code/koda/ (TypeScript, Agent SDK)
-- Install: ~/.koda/ (config, state, manifests, .env)
-- Content: ~/code/content-hub/ (scripts, servers — moving to ~/.koda/ next session)
-- pm2 daemon, tick disabled
-- Isolated task sessions, per-task limits, retry, $50/day budget
-- Context compaction, auto-recovery
-- Plugin manifests → system prompt
-- 2 built-in SDK servers (agent-tools, gsc) + 7 external
-- 20 scheduled tasks + dream cycle + heartbeat
-- Health endpoint at :3847/health
+- Source: ~/code/koda/ (TypeScript, runs via npx tsx)
+- Install: ~/.koda/ (config, state, scripts, servers, manifests, tasks, .env)
+- pm2 daemon, 42 git commits
+- New files: src/patterns.ts, src/dream.ts, src/teleport.ts
+- SDK: @anthropic-ai/claude-agent-sdk 0.2.92 + zod 4

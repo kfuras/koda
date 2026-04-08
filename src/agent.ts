@@ -292,6 +292,7 @@ export class KodaAgent {
     taskName: string,
     prompt: string,
     taskLimits?: { maxTurns: number; maxBudgetUsd: number },
+    modelOverride?: string,
   ): Promise<{ text: string; cost: number; turns: number; isError: boolean }> {
     const limits = taskLimits ?? DEFAULT_TASK_LIMITS;
     const controller = new AbortController();
@@ -303,7 +304,7 @@ export class KodaAgent {
         abortController: controller,
         systemPrompt: SYSTEM_PROMPT,
         tools: { type: "preset", preset: "claude_code" },
-        model: AGENT_DEFAULTS.model,
+        model: modelOverride ?? AGENT_DEFAULTS.model,
         maxTurns: limits.maxTurns,
         maxBudgetUsd: limits.maxBudgetUsd,
         permissionMode: "bypassPermissions",

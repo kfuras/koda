@@ -273,7 +273,7 @@ function startHeartbeat(): NodeJS.Timeout {
 // --- Tick loop ---
 
 function startTickLoop(agent: KodaAgent, bot: KodaBot) {
-  const tick = () => {
+  const tick = async () => {
     const userIdle = bot.isUserIdle();
     const date = today();
     const hour = new Date().getHours();
@@ -281,21 +281,42 @@ function startTickLoop(agent: KodaAgent, bot: KodaBot) {
     if (hour < 7 || hour > 23) return;
 
     const tickPrompt =
-      `[TICK] Quick check-in. User is ${userIdle ? "IDLE/OFFLINE" : "ACTIVE"}.` +
+      `[TICK] Lightweight check-in. User is ${userIdle ? "IDLE/OFFLINE" : "ACTIVE"}.` +
       ` Date: ${date}, time: ${new Date().toTimeString().slice(0, 5)}.` +
-      `\n\nThis is a LIGHTWEIGHT check. Do NOT execute tasks. Do NOT read files unless critical.` +
-      `\n\nQuickly assess from memory:` +
-      `\n1. Any approved initiatives you haven't started yet?` +
-      `\n2. Anything urgent that needs immediate attention?` +
-      `\n\nIf something needs doing, use propose_task() to queue it — do NOT do it now.` +
-      `\nIf nothing needs attention, respond with just "tick ok".` +
-      `\nKeep this under 3 tool calls.`;
+      `\n\nRead ~/.koda/data/observations.md and ~/.koda/goals.md.` +
+      `\n\nAssess:` +
+      `\n1. Any approved initiatives that haven't been started?` +
+      `\n2. Anything urgent for today?` +
+      `\n\nIf something needs doing, call propose_task() to queue it — do NOT execute now.` +
+      `\nIf nothing needs attention, respond with exactly "tick ok".` +
+      `\nMax 3 tool calls total.`;
 
-    agent.send(tickPrompt, async (responseText) => {
-      if (responseText && !responseText.toLowerCase().includes("tick ok")) {
-        await bot.sendProactive(`**[tick]** ${responseText}`);
+    // Silent tick — no Discord output for normal operation. Tick acts via
+    // propose_task() if it finds anything, and propose_task handles surfacing.
+    // Circuit breaker surfaces only failures (after 3 consecutive) and recovery.
+    try {
+      await agent.runIsolatedTask(
+        "tick",
+        tickPrompt,
+        { maxTurns: 3, maxBudgetUsd: 0.10 },
+        "claude-sonnet-4-6",
+      );
+      // Detect recovery: if we were in a failing state, announce recovery once.
+      const wasFailing = taskCircuitBreaker.status("tick").failures > 0;
+      taskCircuitBreaker.recordSuccess("tick");
+      if (wasFailing) {
+        await bot.sendProactive(`**[tick]** Recovered.`);
       }
-    });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error("[tick] failed:", errorMsg);
+      const justTripped = taskCircuitBreaker.recordFailure("tick");
+      if (justTripped) {
+        await bot.sendProactive(
+          `**[tick]** Tick loop has failed 3 times. Last error: ${errorMsg}. Further failures will be silent until recovery.`,
+        );
+      }
+    }
   };
 
   if (TICK_INTERVAL_MS <= 0) {

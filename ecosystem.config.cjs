@@ -21,7 +21,8 @@ module.exports = {
     merge_logs: true,
     env: {
       NODE_ENV: "production",
-      TICK_INTERVAL_MS: "0",
+      // TICK_INTERVAL_MS is loaded from ~/.koda/.env — do NOT hardcode here.
+      // pm2 env overrides dotenv on cold start, which silently breaks the tick.
     },
   }],
 };

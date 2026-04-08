@@ -41,7 +41,7 @@ DISCORD_PROACTIVE_CHANNEL=      # Channel ID for agent-initiated messages (optio
 DISCORD_MENTION_ONLY=false      # Only respond when @mentioned
 WEBHOOK_PORT=3847               # GitHub webhook listener port
 WEBHOOK_SECRET=                 # GitHub webhook secret (optional)
-TICK_INTERVAL_MS=300000         # Autonomous tick interval (default 5 min)
+TICK_INTERVAL_MS=900000         # Autonomous tick interval (recommended 15 min; set 0 to disable)
 ```
 
 ## Architecture
@@ -131,23 +131,26 @@ src/
 
 ### Persistent Session
 
-Koda runs as a single persistent agent session using the Agent SDK's streaming input mode. Discord messages, scheduled tasks, and the tick loop all feed into the same session. The agent maintains context across messages and survives restarts via session resume.
+Koda runs as a single persistent agent session using the Agent SDK's streaming input mode. Discord messages and GitHub webhooks feed into the same session, which maintains context across messages and survives restarts via session resume. Scheduled tasks and the tick loop run as **isolated** one-shot sessions with their own budget caps, so they don't bloat the persistent session's context.
 
 ```
 Discord message ─┐
-Scheduled task ───┤──→ persistent agent session ──→ responses → Discord
-Tick loop ────────┤    (stays alive)
-GitHub webhook ───┘
-Voice channel ────┘
+GitHub webhook ───┤──→ persistent agent session ──→ responses → Discord
+Voice channel ────┘    (Opus, stays alive)
+
+Scheduled task ──→ isolated session (Opus, fresh context, budget-capped)
+Tick loop ───────→ isolated session (Sonnet, cheaper, silent)
 ```
 
 ### Autonomous Behavior
 
-Every 5 minutes, the tick loop evaluates:
+Every 15 minutes (configurable via `TICK_INTERVAL_MS`), the tick loop runs a silent lightweight check on Sonnet 4.6:
 - Pending initiatives (self-proposed tasks)
-- Goals falling behind (reads GOALS.md)
+- Goals falling behind (reads goals.md)
 - Observations that need action
 - Content outcomes to check
+
+The tick is **silent by default** — no Discord output for normal operation. If the tick finds something, it calls `propose_task()` which routes through the existing approval flow. A circuit breaker surfaces only tick **failures** (after 3 consecutive) and recovery, so a broken tick loop doesn't stay silent, but a working one doesn't make noise.
 
 When the user is **idle** (no Discord activity for 15 min), autonomy increases — low/medium priority tasks execute without approval. When **active**, the agent asks first.
 
@@ -290,7 +293,7 @@ Conversation history is stored automatically by the Agent SDK in `~/.claude/` as
 - Auto-backup: 3:08 AM (rsync to ~/.koda/backups/)
 - Outcome check: every 6 hours
 - Initiative review: every 2 hours
-- Tick loop: every 5 minutes (disabled by default)
+- Tick loop: every 15 minutes (silent Sonnet isolated session, `TICK_INTERVAL_MS=0` to disable)
 - Heartbeat: every 60 seconds
 - Memory extraction: background, every 3 conversation turns
 
