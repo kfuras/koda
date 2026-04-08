@@ -164,9 +164,52 @@ rm -rf ~/.koda
 - ffmpeg, whisper, edge-tts (for voice channel support — optional)
 - pm2 (script auto-installs via `npm install -g pm2`)
 
+## First-run setup
+
+After running the install script (or cloning manually), initialize `~/.koda/`:
+
+```bash
+koda init
+```
+
+This copies template files from the repo into `~/.koda/`:
+
+```
+~/.koda/
+├── config.json           ← edit: your name, social handles, model choice
+├── soul.md               ← edit: agent personality, tone, hard limits
+├── user.md               ← edit: who you are, projects, voice, audience
+├── goals.md              ← edit: measurable targets the agent tracks
+├── learnings.md          ← starts empty, grows as the agent runs
+├── tasks.json            ← edit: scheduled tasks (5 examples included)
+├── mcp-servers.json      ← edit: MCP servers to connect
+├── .env.example          ← copy to .env and fill in secrets
+└── skills/               ← example skills to learn the format
+    ├── self-heal.md      (flat format)
+    └── example-directory-skill/
+        └── SKILL.md      (directory format, ClawHub-compatible)
+```
+
+**Nothing gets overwritten.** `koda init` is safe to re-run — it only creates files that don't already exist. The `*.example.*` versions in `~/.koda/` are refreshed every run so you can always see the current template.
+
+After editing the config files, start the daemon:
+
+```bash
+# Set up your .env file first
+cp ~/.koda/.env.example ~/.koda/.env
+# edit ~/.koda/.env with your Discord token and API keys
+
+# Start the daemon
+cd <your koda repo> && pm2 start ecosystem.config.cjs
+
+# Verify
+koda status
+```
+
 ## CLI commands
 
 ```bash
+koda init       # set up ~/.koda/ on first install (safe to re-run)
 koda status     # show daemon state, skills, memory freshness
 koda update     # pull latest code, rebuild, restart
 koda logs       # tail the daemon logs

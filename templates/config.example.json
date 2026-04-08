@@ -1,0 +1,37 @@
+{
+  "_comment": "Koda configuration. Copy this to ~/.koda/config.json and fill in your values. See README.md for field descriptions.",
+
+  "agent": {
+    "name": "Koda",
+    "owner": "Your Name Here",
+    "model": "claude-opus-4-6",
+    "max_turns": 25,
+    "max_budget_usd": 10,
+    "daily_budget_usd": 50
+  },
+
+  "paths": {
+    "content_hub": "/Users/YOUR_USERNAME/.koda",
+    "_comment_skool_sync": "Optional: path to a script that syncs community members. Remove if unused."
+  },
+
+  "social": {
+    "_comment": "Your social handles. Any field you don't use, set to empty string or remove.",
+    "x_handle": "",
+    "bluesky_handle": "",
+    "instagram_handle": "",
+    "youtube_channel": "",
+    "website": "",
+    "cta_url": ""
+  },
+
+  "gsc": {
+    "_comment": "Google Search Console sites you want analytics for. Empty array if none.",
+    "sites": []
+  },
+
+  "discord": {
+    "_comment": "Set mention_only to true if Koda should only respond to @mentions in channels.",
+    "mention_only": false
+  }
+}

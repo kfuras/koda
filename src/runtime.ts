@@ -176,6 +176,6 @@ function detectContentType(
   if (taskName.includes("article")) return "article";
   if (text.toLowerCase().includes("bluesky")) return "bluesky_post";
   if (text.toLowerCase().includes("youtube") || text.toLowerCase().includes("video")) return "video";
-  if (text.toLowerCase().includes("blog") || text.toLowerCase().includes("notipo")) return "blog_post";
+  if (text.toLowerCase().includes("blog")) return "blog_post";
   return null;
 }

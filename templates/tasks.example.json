@@ -1,0 +1,41 @@
+{
+  "_comment": "Scheduled tasks. Koda's scheduler reads this file and runs each task on its cron schedule. Copy to ~/.koda/tasks.json and customize for your workflow.",
+  "_format": "Each task has: prompt (what Koda should do), cron (when), type (silent | approval), optional timeout (seconds), optional chain (next task name), optional limits (maxTurns, maxBudgetUsd).",
+  "_cron_reference": "Standard cron: 'minute hour day month weekday'. Examples: '0 9 * * *' = 9am daily, '0 */6 * * *' = every 6 hours, '0 20 * * 1' = 8pm every Monday.",
+
+  "daily_observation_review": {
+    "prompt": "Read the last 24 hours of observations.md and summarize the 3 most important things that happened. If anything needs follow-up, use propose_task() to queue it.",
+    "cron": "0 20 * * *",
+    "type": "silent",
+    "limits": { "maxTurns": 5, "maxBudgetUsd": 0.50 }
+  },
+
+  "weekly_goal_check": {
+    "prompt": "Read ~/.koda/goals.md. For each goal, check progress against the target. Report the biggest gap in Discord. Propose 1-3 tasks that would close it.",
+    "cron": "0 9 * * 1",
+    "type": "approval",
+    "limits": { "maxTurns": 10, "maxBudgetUsd": 1.00 }
+  },
+
+  "healthcheck": {
+    "prompt": "Call the check_health tool. If any issue is found, report it in Discord. If everything is fine, log silently — do not post to Discord.",
+    "cron": "0 */6 * * *",
+    "type": "silent",
+    "limits": { "maxTurns": 3, "maxBudgetUsd": 0.10 }
+  },
+
+  "memory_consolidation": {
+    "prompt": "Review observations from today. Promote any durable patterns (ones that would still be true next week) to learnings.md. Keep learnings.md under 200 lines — delete or merge old entries if needed.",
+    "cron": "0 3 * * *",
+    "type": "silent",
+    "limits": { "maxTurns": 8, "maxBudgetUsd": 0.50 }
+  },
+
+  "example_approval_task": {
+    "_comment": "Example of an 'approval' task — Koda will draft something and wait for your Discord approval before acting. Delete or customize.",
+    "prompt": "Draft 3 tweets about recent work from observations.md. Send drafts to Discord for approval. Do NOT post until approved.",
+    "cron": "0 10 * * 2,4",
+    "type": "approval",
+    "limits": { "maxTurns": 5, "maxBudgetUsd": 0.30 }
+  }
+}

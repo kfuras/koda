@@ -1,15 +1,45 @@
 /**
  * koda init — set up ~/.koda/ directory with config and template files.
- * Like `openclaw onboard` — generates user-specific config from templates.
+ *
+ * Like `openclaw onboard`: creates the user's ~/.koda/ structure and copies
+ * template files into place on first install. Never overwrites existing
+ * files — your config, memory, and skills are safe.
+ *
+ * Usage: `npx tsx src/init.ts` (or run via `koda init` once that command lands)
  */
 
-import { existsSync, mkdirSync, copyFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  copyFileSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
+import { resolve, dirname } from "node:path";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 const KODA_HOME = resolve(homedir(), ".koda");
-const TEMPLATES_DIR = resolve(import.meta.dirname ?? ".", "..", "templates");
 
+// Walk up from this file to find the repo root (works from both src/ and dist/)
+function findRepoRoot(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  let dir = here;
+  while (dir !== "/" && dir !== ".") {
+    if (existsSync(resolve(dir, "package.json")) && existsSync(resolve(dir, "templates"))) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(`Could not find repo root with templates/ dir from ${here}`);
+}
+
+const REPO_ROOT = findRepoRoot();
+const TEMPLATES_DIR = resolve(REPO_ROOT, "templates");
+
+// Directories to create under ~/.koda/
 const DIRS = [
   "",
   "data",
@@ -20,80 +50,140 @@ const DIRS = [
   "data/daily-logs",
   "logs",
   "manifests",
+  "skills",
+  "servers",
+  "scripts",
+  "backups",
 ];
 
+/**
+ * Template files to copy on first run.
+ * - src: filename under templates/ (with .example suffix)
+ * - dst: filename in ~/.koda/ (without .example suffix — this is what Koda reads)
+ */
 const TEMPLATE_FILES = [
-  { src: "config.json", dst: "config.json" },
-  { src: "soul.md", dst: "soul.md" },
-  { src: "user.md", dst: "user.md" },
-  { src: "learnings.md", dst: "learnings.md" },
-  { src: "goals.md", dst: "goals.md" },
-  { src: "mcp-servers.json", dst: "mcp-servers.json" },
-  { src: "tasks.json", dst: "tasks.json" },
+  { src: "config.example.json",       dst: "config.json" },
+  { src: "soul.example.md",           dst: "soul.md" },
+  { src: "user.example.md",           dst: "user.md" },
+  { src: "goals.example.md",          dst: "goals.md" },
+  { src: "learnings.example.md",      dst: "learnings.md" },
+  { src: "mcp-servers.example.json",  dst: "mcp-servers.json" },
+  { src: "tasks.example.json",        dst: "tasks.json" },
 ];
 
-function init() {
-  console.log(`Initializing Koda home directory: ${KODA_HOME}\n`);
+function init(): void {
+  console.log(`Initializing Koda home at ${KODA_HOME}\n`);
 
-  // Create directories
+  // 1. Create directories
+  console.log("Creating directories:");
   for (const dir of DIRS) {
     const path = resolve(KODA_HOME, dir);
-    if (!existsSync(path)) {
-      mkdirSync(path, { recursive: true });
-      console.log(`  Created: ${dir || "~/.koda/"}`);
-    }
-  }
-
-  // Copy template files (skip if already exist)
-  for (const { src, dst } of TEMPLATE_FILES) {
-    const target = resolve(KODA_HOME, dst);
-    if (existsSync(target)) {
-      console.log(`  Exists:  ${dst} (skipped)`);
+    if (existsSync(path)) {
+      console.log(`  exists   ${dir || "~/.koda/"}`);
     } else {
-      copyFileSync(resolve(TEMPLATES_DIR, src), target);
-      console.log(`  Created: ${dst}`);
+      mkdirSync(path, { recursive: true });
+      console.log(`  created  ${dir || "~/.koda/"}`);
     }
   }
 
-  // Create .env.example
-  const envExample = resolve(KODA_HOME, ".env.example");
-  if (!existsSync(envExample)) {
-    writeFileSync(envExample, `# Required
-DISCORD_BOT_TOKEN=
-DISCORD_ALLOWED_CHANNELS=
-DISCORD_PROACTIVE_CHANNEL=
-DISCORD_ALLOWED_USERS=
+  // 2. Copy template files (never overwrite existing user config)
+  console.log("\nCopying template files:");
+  for (const { src, dst } of TEMPLATE_FILES) {
+    const srcPath = resolve(TEMPLATES_DIR, src);
+    const dstPath = resolve(KODA_HOME, dst);
 
-# Social (set these in ~/.secrets.zsh or here)
-# X_CONSUMER_KEY=
-# X_CONSUMER_SECRET=
-# X_ACCESS_TOKEN=
-# X_ACCESS_TOKEN_SECRET=
-# BLUESKY_HANDLE=
-# BLUESKY_APP_PASSWORD=
-# NOTIPO_API_KEY=
-# NOTIPO_URL=https://notipo.com
-# GEMINI_API_KEY=
-# AIRTABLE_API_KEY=
+    if (!existsSync(srcPath)) {
+      console.log(`  skipped  ${dst}  (template ${src} missing in repo)`);
+      continue;
+    }
+    if (existsSync(dstPath)) {
+      console.log(`  exists   ${dst}  (kept — your version preserved)`);
+      continue;
+    }
+    copyFileSync(srcPath, dstPath);
+    console.log(`  created  ${dst}`);
+  }
 
-# Optional
-# TICK_INTERVAL_MS=0
-# DAILY_BUDGET_USD=50
-# KODA_HOME=~/.koda
-`);
-    console.log(`  Created: .env.example`);
+  // 3. Also write the .example versions alongside real files for reference
+  // This way users can always see the latest template without losing their config
+  console.log("\nWriting reference copies (always overwritten):");
+  for (const { src } of TEMPLATE_FILES) {
+    const srcPath = resolve(TEMPLATES_DIR, src);
+    const dstPath = resolve(KODA_HOME, src);
+    if (!existsSync(srcPath)) continue;
+    copyFileSync(srcPath, dstPath);
+    console.log(`  wrote    ${src}`);
+  }
+
+  // 4. Copy .env.example from the repo root
+  const repoEnvExample = resolve(REPO_ROOT, ".env.example");
+  const kodaEnvExample = resolve(KODA_HOME, ".env.example");
+  if (existsSync(repoEnvExample)) {
+    copyFileSync(repoEnvExample, kodaEnvExample);
+    console.log(`\n  wrote    .env.example  (from repo root)`);
+  }
+
+  // 5. Copy example skills (preserves existing skill dirs)
+  const srcSkillsDir = resolve(TEMPLATES_DIR, "skills");
+  const dstSkillsDir = resolve(KODA_HOME, "skills");
+  if (existsSync(srcSkillsDir)) {
+    console.log("\nCopying example skills:");
+    for (const entry of readdirSync(srcSkillsDir)) {
+      const src = resolve(srcSkillsDir, entry);
+      const dst = resolve(dstSkillsDir, entry);
+      try {
+        const st = statSync(src);
+        if (st.isFile() && entry.endsWith(".md")) {
+          if (existsSync(dst)) {
+            console.log(`  exists   skills/${entry}`);
+          } else {
+            copyFileSync(src, dst);
+            console.log(`  created  skills/${entry}`);
+          }
+        } else if (st.isDirectory()) {
+          if (existsSync(dst)) {
+            console.log(`  exists   skills/${entry}/`);
+          } else {
+            copySkillDirectory(src, dst);
+            console.log(`  created  skills/${entry}/`);
+          }
+        }
+      } catch { /* ignore */ }
+    }
   }
 
   console.log(`
-Done! Next steps:
+${"-".repeat(60)}
+Koda home ready at ${KODA_HOME}
 
-  1. Edit ~/.koda/config.json with your details
-  2. Edit ~/.koda/soul.md and ~/.koda/user.md
-  3. Add MCP servers to ~/.koda/mcp-servers.json
-  4. Add plugin manifests to ~/.koda/manifests/
-  5. Set required env vars (see ~/.koda/.env.example)
-  6. Run: npx tsx src/index.ts
+Next steps:
+  1. Edit ~/.koda/config.json           (name, social handles, model budgets)
+  2. Edit ~/.koda/soul.md                (agent personality, working style)
+  3. Edit ~/.koda/user.md                (who you are, your projects, your voice)
+  4. Edit ~/.koda/goals.md               (measurable targets)
+  5. Edit ~/.koda/tasks.json             (scheduled tasks — or keep the examples)
+  6. Copy ~/.koda/.env.example → ~/.koda/.env and fill in secrets
+  7. Run: koda doctor                   (verify your setup)
+  8. Run: pm2 start ecosystem.config.cjs  (start the daemon)
+  9. Run: koda status                   (check it's running)
+
+The .example files in ~/.koda/ are reference copies — refreshed on every
+run of init. Your real files (without .example) are never overwritten.
 `);
+}
+
+function copySkillDirectory(src: string, dst: string): void {
+  mkdirSync(dst, { recursive: true });
+  for (const entry of readdirSync(src)) {
+    const srcFile = resolve(src, entry);
+    const dstFile = resolve(dst, entry);
+    const st = statSync(srcFile);
+    if (st.isFile()) {
+      copyFileSync(srcFile, dstFile);
+    } else if (st.isDirectory()) {
+      copySkillDirectory(srcFile, dstFile);
+    }
+  }
 }
 
 init();

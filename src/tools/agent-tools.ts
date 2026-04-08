@@ -442,8 +442,8 @@ const installClawhubSkill = tool(
   "missing env vars, total bytes downloaded, and a list of any executable files bundled " +
   "(so the user can audit before activation).",
   {
-    author: z.string().describe("ClawHub author handle, e.g. 'kfuras' or '26medias'"),
-    name: z.string().describe("Skill name, e.g. 'notipo' or 'runware'"),
+    author: z.string().describe("ClawHub author handle (the part before the slash in clawhub.ai/<author>/<skill>)"),
+    name: z.string().describe("Skill name (the part after the slash in clawhub.ai/<author>/<skill>)"),
   },
   async ({ author, name }) => {
     if (!safeName(author) || !safeName(name)) {

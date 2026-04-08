@@ -1,0 +1,28 @@
+{
+  "_comment": "MCP servers Koda connects to. Copy to ~/.koda/mcp-servers.json and enable the ones you want. Paths use $ENV_VAR placeholders resolved at runtime from ~/.koda/.env — this lets you commit the file structure without leaking paths.",
+
+  "_example_gmail": {
+    "_comment": "Example: Gmail MCP. Uncomment and set GMAIL_MCP_PYTHON + GMAIL_MCP_PATH in ~/.koda/.env",
+    "command": "$GMAIL_MCP_PYTHON",
+    "args": ["$GMAIL_MCP_PATH"],
+    "defaults": {
+      "GMAIL_MCP_PYTHON": "/path/to/gmail-mcp/.venv/bin/python",
+      "GMAIL_MCP_PATH": "/path/to/gmail-mcp/server.py"
+    }
+  },
+
+  "_example_airtable": {
+    "_comment": "Example: Airtable MCP. Uncomment if you use Airtable.",
+    "command": "$AIRTABLE_MCP_COMMAND",
+    "args": [],
+    "defaults": {
+      "AIRTABLE_MCP_COMMAND": "/path/to/run-airtable-mcp.sh"
+    }
+  },
+
+  "_example_context7": {
+    "_comment": "Example: Context7 (live library docs). No setup required, just uncomment to enable.",
+    "command": "npx",
+    "args": ["-y", "@upstash/context7-mcp"]
+  }
+}
