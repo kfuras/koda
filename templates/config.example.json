@@ -10,12 +10,7 @@
     "daily_budget_usd": 50
   },
 
-  "paths": {
-    "content_hub": "/Users/YOUR_USERNAME/.koda",
-    "_comment_skool_sync": "Optional: path to a script that syncs community members. Remove if unused."
-  },
-
-  "social": {
+"social": {
     "_comment": "Your social handles. Any field you don't use, set to empty string or remove.",
     "x_handle": "",
     "bluesky_handle": "",

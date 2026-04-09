@@ -21,14 +21,14 @@ import { writeFile, readFile, unlink, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { type KodaAgent } from "./agent.js";
 import { type KodaBot } from "./bot.js";
-import { CONTENT_HUB_DIR } from "./config.js";
+import { KODA_HOME } from "./config.js";
 import { Transform } from "node:stream";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { OpusEncoder } = require("@discordjs/opus") as { OpusEncoder: new (rate: number, channels: number) => { decode: (buf: Buffer) => Buffer } };
 
 const execFileAsync = promisify(execFile);
-const TMP_DIR = resolve(CONTENT_HUB_DIR, "data/.voice-tmp");
+const TMP_DIR = resolve(KODA_HOME, "data/.voice-tmp");
 
 // --- Opus to PCM decoder ---
 

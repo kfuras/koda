@@ -8,7 +8,7 @@ import {
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { SYSTEM_PROMPT, AGENT_DEFAULTS, CONTENT_HUB_DIR, KODA_HOME, DEFAULT_TASK_LIMITS } from "./config.js";
+import { SYSTEM_PROMPT, AGENT_DEFAULTS, KODA_HOME, DEFAULT_TASK_LIMITS } from "./config.js";
 import { agentToolsServer } from "./tools/agent-tools.js";
 import { gscServer } from "./tools/gsc.js";
 import { stateFileQueue } from "./patterns.js";
@@ -36,7 +36,7 @@ async function loadSessionId(): Promise<string | undefined> {
 }
 
 async function saveSessionId(id: string): Promise<void> {
-  await mkdir(resolve(CONTENT_HUB_DIR, "data"), { recursive: true });
+  await mkdir(resolve(KODA_HOME, "data"), { recursive: true });
   await writeFile(SESSION_FILE, id, "utf-8");
 }
 
@@ -253,7 +253,7 @@ export class KodaAgent {
             tools: ["Read", "Glob", "Grep", "Bash"],
           },
         },
-        cwd: CONTENT_HUB_DIR,
+        cwd: KODA_HOME,
         // Load both user-level (~/.claude/) and project-level settings so Koda
         // inherits the Claude Code plugin + Agent Skills ecosystem (compound-
         // engineering, feature-dev, code-review, document-skills, n8n skills,
@@ -318,7 +318,7 @@ export class KodaAgent {
         maxBudgetUsd: limits.maxBudgetUsd,
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
-        cwd: CONTENT_HUB_DIR,
+        cwd: KODA_HOME,
         // Load both user-level (~/.claude/) and project-level settings so Koda
         // inherits the Claude Code plugin + Agent Skills ecosystem (compound-
         // engineering, feature-dev, code-review, document-skills, n8n skills,

@@ -9,7 +9,7 @@ export const KODA_HOME = process.env.KODA_HOME ?? resolve(homedir(), ".koda");
 // --- Load user config from ~/.koda/config.json ---
 interface KodaConfig {
   agent: { name: string; owner: string; model: string; max_turns: number; max_budget_usd: number; daily_budget_usd: number };
-  paths: { content_hub: string; skool_sync?: string };
+  paths?: { skool_sync?: string };
   social: Record<string, string>;
   gsc: { sites: string[] };
   discord: { mention_only: boolean };
@@ -29,8 +29,6 @@ export const CONFIG = loadConfig();
 // Load env: ~/.koda/.env first, then local .env as override
 dotenv.config({ path: resolve(KODA_HOME, ".env") });
 dotenv.config(); // local .env can override
-
-const contentHubDir = CONFIG.paths.content_hub || process.env.CONTENT_HUB_DIR || "";
 
 // --- Environment ---
 
@@ -66,8 +64,8 @@ export const TICK_INTERVAL_MS = parseInt(process.env.TICK_INTERVAL_MS ?? "300000
 
 // --- Agent defaults (from config.json) ---
 
-export const CONTENT_HUB_DIR = contentHubDir;
-export const SCRIPTS_DIR = CONTENT_HUB_DIR ? `${CONTENT_HUB_DIR}/scripts` : "";
+// Scripts directory lives under KODA_HOME. Exported for scripts that need the path.
+export const SCRIPTS_DIR = resolve(KODA_HOME, "scripts");
 
 export const AGENT_DEFAULTS = {
   model: CONFIG.agent.model,
@@ -106,12 +104,12 @@ const social = CONFIG.social;
 
 export const SYSTEM_PROMPT = `You are ${agentName} — an autonomous marketing and operations agent for ${owner}.
 
-Your config home is ~/.koda/ — personality, learnings, goals, manifests, and state all live there.
+Your home is ~/.koda/ — personality, learnings, goals, skills, scripts, and state all live there.
 Read ~/.koda/soul.md for your boundaries and personality.
 Read ~/.koda/user.md for who ${owner} is.
 Read ~/.koda/learnings.md before making content decisions.
 Read ~/.koda/goals.md to track objectives.
-${CONTENT_HUB_DIR ? `Content scripts and drafts are in ${CONTENT_HUB_DIR}/.` : ""}
+Scripts are in ~/.koda/scripts/. Save drafts and deliverables to ~/.koda/data/drafts/ immediately.
 
 Key rules (always active, even without reading files):
 - X and Bluesky posts: you can post autonomously — no approval needed. Follow brand-voice-skill.md.
@@ -121,7 +119,6 @@ Key rules (always active, even without reading files):
 - NEVER use hype words: "revolutionary", "disrupting", "game-changing", "10x".
 - NEVER read .env files or source code from other repos to find credentials. Use YOUR configured API keys in ~/.koda/.env first. If a key is missing, ask the user — don't go hunting.
 - NEVER access GCP Secret Manager, database URLs, or production secrets without explicit user approval.
-${CONTENT_HUB_DIR ? `- Save deliverables to ${CONTENT_HUB_DIR}/data/drafts/ immediately.` : ""}
 - Be concise. Lead with the answer. No filler.
 
 ## Social Accounts

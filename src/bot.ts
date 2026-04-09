@@ -17,7 +17,6 @@ import {
   DISCORD_PROACTIVE_CHANNEL,
   DISCORD_ALLOWED_USERS,
   RATE_LIMIT_MS,
-  CONTENT_HUB_DIR,
   KODA_HOME,
 } from "./config.js";
 import { type KodaAgent } from "./agent.js";
@@ -107,7 +106,7 @@ function extractFilePaths(text: string): string[] {
   for (const pattern of FILE_PATTERNS) {
     const matches = text.matchAll(new RegExp(pattern));
     for (const match of matches) {
-      const fullPath = resolve(CONTENT_HUB_DIR, match[0]);
+      const fullPath = resolve(KODA_HOME, match[0]);
       if (existsSync(fullPath)) {
         paths.push(fullPath);
       }
