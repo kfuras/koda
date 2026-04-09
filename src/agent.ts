@@ -6,8 +6,9 @@ import {
   type SDKAssistantMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import { homedir } from "node:os";
 import { SYSTEM_PROMPT, AGENT_DEFAULTS, KODA_HOME, DEFAULT_TASK_LIMITS } from "./config.js";
 import { agentToolsServer } from "./tools/agent-tools.js";
 import { gscServer } from "./tools/gsc.js";
@@ -159,6 +160,73 @@ function getMcpServers() {
   };
 }
 
+// --- Plugin discovery ---
+//
+// We used to pass `settingSources: ["user", "project"]` to query() to pick
+// up Claude Code plugins and AgentSkills from the operator's ~/.claude/.
+// That also bled in the operator's personal CLAUDE.md and ~/.claude/workspace/
+// — which pointed Koda at the wrong learnings.md and memory/ directory (they
+// belong to the human-operator-using-Claude-Code persona, not Koda).
+//
+// The Agent SDK has a dedicated `plugins: SdkPluginConfig[]` API for exactly
+// this case: load Claude Code plugin bundles from explicit paths, without
+// inheriting user settings. We enumerate the operator's installed plugins
+// from ~/.claude/plugins/installed_plugins.json and pass their absolute
+// paths — no filesystem settings are loaded, no workspace state leaks.
+
+interface SdkPluginConfig {
+  type: "local";
+  path: string;
+}
+
+interface InstalledPluginEntry {
+  installPath: string;
+  scope?: string;
+  version?: string;
+}
+
+const USER_PLUGIN_INSTALL_MANIFEST = resolve(homedir(), ".claude/plugins/installed_plugins.json");
+const KODA_PLUGINS_DIR = resolve(KODA_HOME, "plugins");
+
+function discoverPlugins(): SdkPluginConfig[] {
+  const out: SdkPluginConfig[] = [];
+
+  // 1. Koda-owned plugins (if any) — first-class, always loaded.
+  try {
+    if (existsSync(KODA_PLUGINS_DIR)) {
+      for (const name of readdirSync(KODA_PLUGINS_DIR)) {
+        const p = resolve(KODA_PLUGINS_DIR, name);
+        if (statSync(p).isDirectory()) out.push({ type: "local", path: p });
+      }
+    }
+  } catch { /* best-effort */ }
+
+  // 2. User-installed Claude Code plugins — borrowed as a capability library.
+  //    We read installed_plugins.json (the authoritative source) and pass
+  //    each installPath explicitly. This does NOT load user settings.json
+  //    or user CLAUDE.md — only the plugin bundle contents.
+  try {
+    const raw = readFileSync(USER_PLUGIN_INSTALL_MANIFEST, "utf-8");
+    const manifest = JSON.parse(raw) as { plugins?: Record<string, InstalledPluginEntry[]> };
+    for (const [pluginKey, entries] of Object.entries(manifest.plugins ?? {})) {
+      // Each plugin may have multiple versions; take the most recent entry.
+      const latest = entries[entries.length - 1];
+      if (latest?.installPath) {
+        out.push({ type: "local", path: latest.installPath });
+        console.log(`[plugins] ${pluginKey} → ${latest.installPath}`);
+      }
+    }
+  } catch {
+    console.log(
+      `[plugins] No user plugin manifest at ${USER_PLUGIN_INSTALL_MANIFEST} ` +
+      `(this is fine if you don't have Claude Code plugins installed)`,
+    );
+  }
+
+  console.log(`[plugins] Loaded ${out.length} plugin bundles`);
+  return out;
+}
+
 // --- Persistent Agent ---
 
 const MEMORY_EXTRACT_PROMPT = `You are a memory extraction agent. Review the conversation exchanges below and extract any key decisions, preferences, facts, or learnings worth remembering.
@@ -254,12 +322,12 @@ export class KodaAgent {
           },
         },
         cwd: KODA_HOME,
-        // Load both user-level (~/.claude/) and project-level settings so Koda
-        // inherits the Claude Code plugin + Agent Skills ecosystem (compound-
-        // engineering, feature-dev, code-review, document-skills, n8n skills,
-        // etc) on top of Koda's own ~/.koda/skills/ layer. This is the same
-        // marketplace surface Claude Code has — one config flag unlocks it.
-        settingSources: ["user", "project"],
+        // Load Claude Code plugins (skills/commands/agents) via the dedicated
+        // `plugins` API instead of `settingSources`. This gives Koda access to
+        // the ecosystem (compound-engineering, feature-dev, document-skills,
+        // etc) WITHOUT inheriting the operator's ~/.claude/CLAUDE.md rules or
+        // ~/.claude/workspace/ state. See discoverPlugins() above for why.
+        plugins: discoverPlugins(),
         ...(this.sessionId ? { resume: this.sessionId } : {}),
         mcpServers: getMcpServers(),
       },
@@ -319,12 +387,9 @@ export class KodaAgent {
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         cwd: KODA_HOME,
-        // Load both user-level (~/.claude/) and project-level settings so Koda
-        // inherits the Claude Code plugin + Agent Skills ecosystem (compound-
-        // engineering, feature-dev, code-review, document-skills, n8n skills,
-        // etc) on top of Koda's own ~/.koda/skills/ layer. This is the same
-        // marketplace surface Claude Code has — one config flag unlocks it.
-        settingSources: ["user", "project"],
+        // Same as the persistent session: plugins via explicit paths, no
+        // settingSources, no user CLAUDE.md or workspace leakage.
+        plugins: discoverPlugins(),
         mcpServers: getMcpServers(),
       },
     });
