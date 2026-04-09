@@ -74,7 +74,15 @@ interface Initiative {
   reason: string;
   priority: "low" | "medium" | "high";
   created: string;
-  status: "pending" | "approved" | "rejected" | "done";
+  /**
+   * pending           — newly proposed, review loop will send it
+   * awaiting_approval — sent to Discord, waiting for reaction
+   * approved          — user reacted ✅, agent should execute
+   * rejected          — user reacted ❌, ignore
+   * done              — executed successfully
+   */
+  status: "pending" | "awaiting_approval" | "approved" | "rejected" | "done";
+  sent_at?: string; // when awaiting_approval was set
 }
 
 async function loadInitiatives(): Promise<Initiative[]> {
@@ -145,6 +153,22 @@ const trackOutcome = tool(
     check_after_hours: z.number().default(24),
   },
   async ({ content_type, content_id, description, check_after_hours }) => {
+    // content_id must be a real identifier — URL or bare ID. Task labels,
+    // descriptions, or result text strings cause the outcome queue to
+    // re-fire forever because there's nothing to actually check.
+    // See init-1775620824873 for the diagnosis.
+    const trimmed = content_id.trim();
+    const isUrl = /^https?:\/\/\S+$/.test(trimmed);
+    const isBareId = /^[a-zA-Z0-9_-]+$/.test(trimmed);
+    if ((!isUrl && !isBareId) || trimmed.length > 500) {
+      return textResult(
+        `ERROR: track_outcome rejected content_id="${trimmed.slice(0, 120)}".\n` +
+        `Required: a real URL (https://...) or bare ID (alphanumeric/dash/underscore).\n` +
+        `Do NOT pass task labels, descriptions, or result text as content_id.\n` +
+        `Example valid: "https://x.com/you/status/2041234567890123456" or "2041234567890123456".`,
+      );
+    }
+
     await mkdir(OUTCOMES_DIR, { recursive: true });
 
     const outcome = {

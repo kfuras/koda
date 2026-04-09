@@ -7,7 +7,7 @@ import {
   AttachmentBuilder,
   ChannelType,
 } from "discord.js";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -267,21 +267,40 @@ export class KodaBot {
 
   async sendApproval(taskName: string, text: string): Promise<void> {
     const channelId = DISCORD_ALLOWED_CHANNELS.values().next().value;
-    if (!channelId) return;
+    if (!channelId) {
+      console.error(
+        `[approval-send] ${taskName}: NO CHANNEL — set DISCORD_ALLOWED_CHANNELS in ~/.koda/.env`,
+      );
+      return;
+    }
 
-    const channel = await this.client.channels.fetch(channelId) as TextChannel | null;
-    if (!channel) return;
+    try {
+      const channel = await this.client.channels.fetch(channelId) as TextChannel | null;
+      if (!channel) {
+        console.error(
+          `[approval-send] ${taskName}: channel ${channelId} not found or not text-based`,
+        );
+        return;
+      }
 
-    const content = `**[APPROVAL NEEDED]** ${taskName}\n\n${text}`;
-    const chunks = chunkMessage(content);
+      const content = `**[APPROVAL NEEDED]** ${taskName}\n\n${text}`;
+      const chunks = chunkMessage(content);
 
-    const firstMsg = await channel.send(chunks[0]);
-    await firstMsg.react("✅");
-    await firstMsg.react("❌");
-    this.approvalMessages.set(firstMsg.id, taskName);
+      const firstMsg = await channel.send(chunks[0]);
+      await firstMsg.react("✅");
+      await firstMsg.react("❌");
+      this.approvalMessages.set(firstMsg.id, taskName);
 
-    for (let i = 1; i < chunks.length; i++) {
-      await channel.send(chunks[i]);
+      for (let i = 1; i < chunks.length; i++) {
+        await channel.send(chunks[i]);
+      }
+
+      console.log(`[approval-sent] ${taskName} → ${channelId}`);
+    } catch (err) {
+      console.error(
+        `[approval-send] ${taskName}: failed —`,
+        err instanceof Error ? err.message : err,
+      );
     }
   }
 
@@ -619,22 +638,45 @@ export class KodaBot {
 
     this.approvalMessages.delete(reaction.message.id);
 
-    if (emoji === "✅") {
-      console.log(`[approval] ${taskName}: APPROVED`);
-      this.agent.send(
-        `[APPROVAL] Task "${taskName}" has been APPROVED by the user. Execute it now.`,
-        async (responseText) => {
-          await this.sendToChannel(responseText);
-        },
-      );
-    } else {
-      console.log(`[approval] ${taskName}: REJECTED`);
-      this.agent.send(
-        `[APPROVAL] Task "${taskName}" has been REJECTED by the user. Do not execute. Acknowledge briefly.`,
-        async (responseText) => {
-          await this.sendToChannel(responseText);
-        },
-      );
+    const approved = emoji === "✅";
+    console.log(`[approval] ${taskName}: ${approved ? "APPROVED" : "REJECTED"}`);
+
+    // If this is an initiative, persist the decision back to the JSON
+    // so the review loop stops resending it. Without this, handleReaction
+    // tells the agent "execute it" but the file still says "awaiting_approval"
+    // forever — which was the spam bug.
+    if (taskName.startsWith("initiative:")) {
+      const id = taskName.slice("initiative:".length);
+      await this.updateInitiativeStatus(id, approved ? "approved" : "rejected");
+    }
+
+    const message = approved
+      ? `[APPROVAL] Task "${taskName}" has been APPROVED by the user. Execute it now.`
+      : `[APPROVAL] Task "${taskName}" has been REJECTED by the user. Do not execute. Acknowledge briefly.`;
+
+    this.agent.send(message, async (responseText) => {
+      await this.sendToChannel(responseText);
+    });
+  }
+
+  private async updateInitiativeStatus(
+    id: string,
+    status: "approved" | "rejected",
+  ): Promise<void> {
+    const file = resolve(KODA_HOME, "data/.agent-initiatives.json");
+    try {
+      const raw = await readFile(file, "utf-8");
+      const data = JSON.parse(raw) as Array<{ id: string; status: string }>;
+      const initiative = data.find((i) => i.id === id);
+      if (!initiative) {
+        console.error(`[initiatives] ${id} not found — cannot update status`);
+        return;
+      }
+      initiative.status = status;
+      await writeFile(file, JSON.stringify(data, null, 2));
+      console.log(`[initiatives] ${id} → ${status}`);
+    } catch (err) {
+      console.error(`[initiatives] Failed to update ${id}:`, err instanceof Error ? err.message : err);
     }
   }
 

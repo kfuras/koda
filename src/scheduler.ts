@@ -209,7 +209,14 @@ async function checkOutcomes(agent: KodaAgent): Promise<void> {
       if (unchecked.length === 0) continue;
 
       for (const outcome of unchecked) {
-        console.log(`[outcomes] Checking: ${outcome.content_type} — ${outcome.description}`);
+        console.log(`[outcomes] Checking: ${outcome.content_type} — ${outcome.content_id}`);
+        // Mark as checked BEFORE dispatching the async agent.send() call.
+        // Previously we set checked=true inside the callback, but the writeFile
+        // below ran synchronously before the callback fired, so the mutation
+        // never persisted and the same outcomes re-fired every cycle forever.
+        // Fire-and-forget is intentional — the check either happens or it's
+        // a one-shot attempt. Better than infinite retry on broken IDs.
+        outcome.checked = true;
         agent.send(
           `[OUTCOME CHECK] Check performance of this ${outcome.content_type} posted on ${outcome.posted_at}:\n` +
           `Description: ${outcome.description}\n` +
@@ -217,9 +224,7 @@ async function checkOutcomes(agent: KodaAgent): Promise<void> {
           `Pull the current metrics (likes, views, engagement). Compare to typical performance.\n` +
           `Record your findings using the observe() tool.\n` +
           `If it performed unusually well or poorly, note WHY you think that happened.`,
-          async () => {
-            outcome.checked = true;
-          },
+          () => {},
         );
       }
 
@@ -232,22 +237,45 @@ async function checkOutcomes(agent: KodaAgent): Promise<void> {
 
 // --- Initiative review ---
 
-async function reviewInitiatives(agent: KodaAgent, bot: KodaBot): Promise<void> {
+async function reviewInitiatives(_agent: KodaAgent, bot: KodaBot): Promise<void> {
   const file = `${KODA_HOME}/data/.agent-initiatives.json`;
   try {
-    const data = JSON.parse(await readFile(file, "utf-8"));
-    const pending = data.filter((i: { status: string; priority: string }) =>
-      i.status === "pending" && (i.priority === "medium" || i.priority === "high"),
+    const raw = await readFile(file, "utf-8");
+    const data = JSON.parse(raw) as Array<{
+      id: string;
+      description: string;
+      reason: string;
+      priority: string;
+      status: string;
+      sent_at?: string;
+    }>;
+
+    // Only pick NEW pending initiatives. Once sent, status flips to
+    // "awaiting_approval" — this loop ignores those so we don't spam
+    // Discord every 2h with the same message.
+    const pending = data.filter(
+      (i) => i.status === "pending" && (i.priority === "medium" || i.priority === "high"),
     );
+
+    if (pending.length === 0) return;
 
     for (const initiative of pending) {
       await bot.sendApproval(
         `initiative:${initiative.id}`,
         `**Self-initiated task (${initiative.priority}):**\n${initiative.description}\n\n**Reason:** ${initiative.reason}`,
       );
+      initiative.status = "awaiting_approval";
+      initiative.sent_at = new Date().toISOString();
     }
-  } catch {
-    // No initiatives file yet
+
+    // Persist the status flip so the next review cycle skips these.
+    await writeFile(file, JSON.stringify(data, null, 2));
+    console.log(`[initiatives] Sent ${pending.length} for approval, marked awaiting_approval`);
+  } catch (err) {
+    // No initiatives file yet is fine; other errors are worth knowing about.
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.error("[initiatives] Review failed:", err);
+    }
   }
 }
 
