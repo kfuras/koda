@@ -151,11 +151,9 @@ Three rules that hold across the pipeline:
 | System | Memory model |
 |---|---|
 | Koda | 6 layers: bootstrap → observations → dream → daily logs → learnings → search |
-| Claude Code (per leaked source) | `autoDream` 4-step cycle: orient → gather signals → consolidate → prune |
-| Claurst (Rust clean-room of leaked Claude Code) | "Memory consolidation" as a feature (details unspecified) |
-| OpenClaw | Flat sessions with persistent state and pruning |
+| Claude Code | `autoDream` 4-step cycle: orient → gather signals → consolidate → prune |
 
-Three out of four production agents converged on the "consolidate raw signals into durable memory" pattern. Koda's pipeline is the most explicit, with each layer individually inspectable on disk. OpenClaw is the outlier — its session-pruning model is simpler but provides no narrative middle tier and no curated long-term wisdom layer.
+Production agents converge on the "consolidate raw signals into durable memory" pattern. Koda's pipeline is the most explicit, with each layer individually inspectable on disk.
 
 ## Where to look in the code
 

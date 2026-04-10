@@ -1,7 +1,7 @@
 /**
  * koda doctor — check Koda configuration for drift against the schema.
  *
- * Inspired by `openclaw doctor`. Reads the expected .env schema from the
+ * Reads the expected .env schema from the
  * repo's .env.example, compares to ~/.koda/.env, and reports any missing
  * required fields. Also verifies ~/.koda/config.json has the required shape
  * and checks that the build artifacts + dependencies exist.

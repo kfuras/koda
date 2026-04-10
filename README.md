@@ -226,9 +226,9 @@ The Agent SDK picks up `ANTHROPIC_API_KEY` if set, falling back to Claude Code C
 
 ### Important: Max + Koda is allowed
 
-As of April 2026, Anthropic blocks Claude subscriptions from powering certain third-party "harnesses" (like OpenClaw). **Koda is not in that category** — it uses the Agent SDK directly rather than wrapping Claude Code. Anthropic has explicitly confirmed that "nothing is changing about how you can use the Agent SDK and MAX subscriptions" (Anthropic engineer Thariq Shihipar, The New Stack, April 2026).
+Koda uses the Agent SDK directly — not a third-party wrapper around Claude Code. Anthropic has explicitly confirmed that "nothing is changing about how you can use the Agent SDK and MAX subscriptions" (Anthropic engineer Thariq Shihipar, The New Stack, April 2026).
 
-So if you're using Max sub with Koda, you're on the explicitly-blessed path.
+If you're using a Pro/Max subscription with Koda, you're on the explicitly-blessed path.
 
 ## First-run setup
 

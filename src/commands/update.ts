@@ -1,7 +1,7 @@
 /**
  * koda update — pull latest code, rebuild, run doctor, restart.
  *
- * Flow (inspired by `openclaw update`):
+ * Flow:
  *   1. Preflight — worktree must be clean (unless --force)
  *   2. git fetch origin main
  *   3. Compare SHAs; exit early if equal (unless --force)

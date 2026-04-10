@@ -1,7 +1,7 @@
 /**
  * koda init — set up ~/.koda/ directory with config and template files.
  *
- * Like `openclaw onboard`: creates the user's ~/.koda/ structure and copies
+ * Creates the user's ~/.koda/ structure and copies
  * template files into place on first install. Never overwrites existing
  * files — your config, memory, and skills are safe.
  *
