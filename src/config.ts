@@ -74,7 +74,7 @@ export const AGENT_DEFAULTS = {
 } as const;
 
 // Default task limits — tasks can override via "limits" field in tasks.json
-export const DEFAULT_TASK_LIMITS = { maxTurns: 15, maxBudgetUsd: 5 };
+export const DEFAULT_TASK_LIMITS = { maxTurns: 25, maxBudgetUsd: 5 };
 
 export const DAILY_BUDGET_USD = CONFIG.agent.daily_budget_usd ?? parseFloat(process.env.DAILY_BUDGET_USD ?? "50");
 
