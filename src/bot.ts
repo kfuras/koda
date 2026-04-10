@@ -406,11 +406,13 @@ export class KodaBot {
 
   private async handleMessage(message: Message): Promise<void> {
     if (message.author.bot) return;
-    if (
-      DISCORD_ALLOWED_CHANNELS.size > 0 &&
-      !DISCORD_ALLOWED_CHANNELS.has(message.channelId)
-    ) {
-      return;
+    if (DISCORD_ALLOWED_CHANNELS.size > 0) {
+      const inAllowed = DISCORD_ALLOWED_CHANNELS.has(message.channelId);
+      const inAllowedThread =
+        message.channel.isThread() &&
+        message.channel.parentId !== null &&
+        DISCORD_ALLOWED_CHANNELS.has(message.channel.parentId);
+      if (!inAllowed && !inAllowedThread) return;
     }
 
     // Allowed users check
