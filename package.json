@@ -1,13 +1,43 @@
 {
   "name": "koda-agent",
   "version": "0.1.0",
+  "description": "Personal AI assistant built on Claude Agent SDK. Runs 24/7 on your machine with Discord as the control plane.",
   "type": "module",
   "private": false,
+  "license": "MIT",
+  "author": "Kjetil Furas <kjetil.furaas@gmail.com>",
+  "homepage": "https://github.com/kfuras/koda",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kfuras/koda.git"
+  },
+  "keywords": [
+    "ai-agent",
+    "claude",
+    "anthropic",
+    "agent-sdk",
+    "autonomous",
+    "discord-bot",
+    "mcp",
+    "marketing-automation"
+  ],
   "bin": {
     "koda": "dist/koda.js"
   },
+  "files": [
+    "dist/",
+    "templates/",
+    "docs/",
+    "scripts/",
+    "ecosystem.config.cjs",
+    "install.sh",
+    "AGENTS.md",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc && chmod +x dist/koda.js",
+    "prepublishOnly": "npm run build",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "cli": "tsx src/cli.ts",
