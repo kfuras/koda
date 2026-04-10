@@ -2,7 +2,7 @@
   "name": "koda-agent",
   "version": "0.1.0",
   "type": "module",
-  "private": true,
+  "private": false,
   "bin": {
     "koda": "dist/koda.js"
   },

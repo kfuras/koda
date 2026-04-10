@@ -1,6 +1,21 @@
-# Koda Agent
+# Koda — Autonomous Marketing Agent
 
-Autonomous marketing and operations agent built on Anthropic's Claude Agent SDK. Replaces the old `claude-daemon.py` with a proper autonomous loop: gather context, think, act, observe, repeat.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-0.2.x-blueviolet)](https://docs.anthropic.com/en/docs/agents)
+[![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)](https://nodejs.org)
+
+**Koda** is an autonomous marketing agent you run on your own machine. It drafts content, posts to X, scans for viral tweets, pulls SEO analytics, writes blog posts, manages your Skool community, and reports everything back to Discord — all on a cron schedule, 24/7, while you sleep.
+
+It runs on the Claude Agent SDK with a Max subscription. No API costs. No cloud hosting. One laptop.
+
+```
+20 scheduled tasks · 9 MCP servers · 18 skills · 6-layer memory system
+Discord control plane · Self-healing · Nightly dream cycle
+```
+
+[Getting Started](#install) · [Architecture](#architecture) · [CLI Commands](#cli-commands) · [Skills](#skills) · [Memory System](#memory-system) · [Discord Commands](#discord-commands) · [AGENTS.md](AGENTS.md)
+
+---
 
 ## Install
 
