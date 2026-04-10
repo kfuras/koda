@@ -602,9 +602,9 @@ async function executeTask(
 export function startScheduler(agent: KodaAgent, bot: KodaBot): void {
   console.log(`Scheduling ${Object.keys(TASKS).length} tasks from ~/.koda/tasks.json`);
 
-  // Wire up progress callback for 30s task updates
+  // Log progress to console only (no Discord spam)
   agent.setProgressCallback((taskName, text) => {
-    void bot.sendToChannel(`**[${taskName}]** ${text}`);
+    console.log(`[${taskName}] ${text}`);
   });
 
   // Clean up stale sessions from previous run
