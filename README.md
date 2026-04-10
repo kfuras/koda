@@ -1,5 +1,6 @@
 # Koda — Personal AI Assistant
 
+[![npm](https://img.shields.io/npm/v/koda-agent)](https://www.npmjs.com/package/koda-agent)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-0.2.x-blueviolet)](https://docs.anthropic.com/en/docs/agents)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)](https://nodejs.org)
@@ -9,33 +10,44 @@
 It runs on the Claude Agent SDK with a Pro/Max subscription. No API costs. No cloud hosting. One laptop.
 
 ```
-20 scheduled tasks · 9 MCP servers · 18 skills · 6-layer memory system
+20 scheduled tasks · 13 MCP servers · 18 skills · 6-layer memory system
 Discord control plane · Self-healing · Nightly dream cycle
 ```
 
-[Getting Started](#install) · [Architecture](#architecture) · [CLI Commands](#cli-commands) · [Skills](#skills) · [Memory System](#memory-system) · [Discord Commands](#discord-commands) · [AGENTS.md](AGENTS.md)
+[Getting Started](#install) · [Architecture](#architecture) · [CLI Commands](#cli-commands) · [Skills](#skills) · [MCP Servers](#mcp-servers) · [Memory System](#memory-system) · [Discord Commands](#discord-commands) · [AGENTS.md](AGENTS.md)
 
 ---
 
 ## Install
 
-### Quick install (recommended)
+### npm (recommended)
 
 ```bash
-cd ~/wherever-you-want-koda-to-live
+npm install -g koda-agent
+koda init
+```
+
+That's it. You now have a global `koda` command and `~/.koda/` with all config, skills, and MCP servers ready to customize.
+
+### From source
+
+If you prefer to work from the repo:
+
+```bash
+git clone https://github.com/kfuras/koda.git
+cd koda
+npm install && npm run build && npm link
+koda init
+```
+
+### curl installer (alternative)
+
+```bash
+cd ~/code   # or wherever you want the repo
 curl -fsSL https://raw.githubusercontent.com/kfuras/koda/main/install.sh | bash
 ```
 
-This creates a `koda` subdirectory at your current location. **You pick the parent directory by cd-ing first.**
-
-Examples:
-```bash
-cd ~/code         # creates ~/code/koda/
-cd ~/projects     # creates ~/projects/koda/
-cd /opt           # creates /opt/koda/ (may need write permissions)
-```
-
-After the script finishes, you'll have a global `koda` command in your PATH.
+Installs prerequisites (Node, pm2, git), clones, builds, links, and runs `koda doctor`.
 
 ### What the install script does
 
