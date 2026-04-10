@@ -6,7 +6,7 @@
 
 **Koda** is an autonomous marketing agent you run on your own machine. It drafts content, posts to X, scans for viral tweets, pulls SEO analytics, writes blog posts, manages your Skool community, and reports everything back to Discord — all on a cron schedule, 24/7, while you sleep.
 
-It runs on the Claude Agent SDK with a Max subscription. No API costs. No cloud hosting. One laptop.
+It runs on the Claude Agent SDK with a Pro/Max subscription. No API costs. No cloud hosting. One laptop.
 
 ```
 20 scheduled tasks · 9 MCP servers · 18 skills · 6-layer memory system
