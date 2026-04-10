@@ -70,20 +70,32 @@ class MessageQueue {
 // --- YOLO Risk Classifier ---
 
 const HIGH_RISK_TOOLS = new Set([
-  "post_tweet", "publish_video", "quote_tweet",
+  // X (posting, deleting, quoting, publishing articles)
   "mcp__x-mcp__post_tweet", "mcp__x-mcp__delete_tweet",
+  "mcp__x-mcp__quote_tweet", "mcp__x-mcp__publish_x_article",
+  // Bluesky
   "mcp__bluesky-mcp__create-post", "mcp__bluesky-mcp__delete-post",
+  // Gmail
   "mcp__gmail__gmail_send", "mcp__gmail__gmail_trash",
+  // YouTube
   "mcp__youtube__youtube_upload_video", "mcp__youtube__youtube_delete_video",
+  // Publishing (multi-platform video)
+  "mcp__publish-tools__publish_video", "mcp__publish-tools__devto_crosspost",
+  // Skool (community posts)
+  "mcp__skool-tools__skool_create_post", "mcp__skool-tools__skool_delete_post",
+  // File system
   "Write", "Edit", "Bash",
-  // Skill/plugin install tools — downloads and enables third-party code.
+  // Skill/plugin install tools
   "mcp__agent-tools__install_clawhub_skill",
   "mcp__agent-tools__install_claude_plugin",
   "mcp__agent-tools__remove_skill",
 ]);
 
 const MEDIUM_RISK_TOOLS = new Set([
-  "generate_image", "skool_airtable_sync",
+  "mcp__content-tools__generate_image",
+  "mcp__skool-tools__skool_sync_members",
+  "mcp__instagram-tools__upload_instagram",
+  "mcp__meta-tools__meta_refresh_token",
   "mcp__airtable__create_record", "mcp__airtable__update_records",
   "mcp__airtable__delete_records",
 ]);
