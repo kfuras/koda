@@ -152,6 +152,25 @@ function init(): void {
     }
   }
 
+  // 6. Copy MCP servers (preserves existing)
+  const srcServersDir = resolve(TEMPLATES_DIR, "servers");
+  const dstServersDir = resolve(KODA_HOME, "servers");
+  if (existsSync(srcServersDir)) {
+    console.log("\nCopying MCP servers:");
+    for (const entry of readdirSync(srcServersDir)) {
+      const src = resolve(srcServersDir, entry);
+      const dst = resolve(dstServersDir, entry);
+      if (statSync(src).isFile() && entry.endsWith(".py")) {
+        if (existsSync(dst)) {
+          console.log(`  exists   servers/${entry}`);
+        } else {
+          copyFileSync(src, dst);
+          console.log(`  created  servers/${entry}`);
+        }
+      }
+    }
+  }
+
   console.log(`
 ${"-".repeat(60)}
 Koda home ready at ${KODA_HOME}
