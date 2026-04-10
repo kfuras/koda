@@ -1,10 +1,10 @@
-# Koda — Autonomous Marketing Agent
+# Koda — Personal AI Assistant
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-0.2.x-blueviolet)](https://docs.anthropic.com/en/docs/agents)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)](https://nodejs.org)
 
-**Koda** is an autonomous marketing agent you run on your own machine. It drafts content, posts to X, scans for viral tweets, pulls SEO analytics, writes blog posts, manages your Skool community, and reports everything back to Discord — all on a cron schedule, 24/7, while you sleep.
+**Koda** is a personal AI assistant you run on your own machine. It drafts content, posts to X, scans for viral tweets, pulls SEO analytics, writes blog posts, manages your Skool community, and reports everything back to Discord — all on a cron schedule, 24/7, while you sleep.
 
 It runs on the Claude Agent SDK with a Pro/Max subscription. No API costs. No cloud hosting. One laptop.
 
