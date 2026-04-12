@@ -8,7 +8,6 @@ import {
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
-import { homedir } from "node:os";
 import { SYSTEM_PROMPT, AGENT_DEFAULTS, KODA_HOME, DEFAULT_TASK_LIMITS } from "./config.js";
 import { agentToolsServer } from "./tools/agent-tools.js";
 import { gscServer } from "./tools/gsc.js";
@@ -191,13 +190,6 @@ interface SdkPluginConfig {
   path: string;
 }
 
-interface InstalledPluginEntry {
-  installPath: string;
-  scope?: string;
-  version?: string;
-}
-
-const USER_PLUGIN_INSTALL_MANIFEST = resolve(homedir(), ".claude/plugins/installed_plugins.json");
 const KODA_PLUGINS_DIR = resolve(KODA_HOME, "plugins");
 
 function discoverPlugins(): SdkPluginConfig[] {
@@ -213,27 +205,11 @@ function discoverPlugins(): SdkPluginConfig[] {
     }
   } catch { /* best-effort */ }
 
-  // 2. User-installed Claude Code plugins — borrowed as a capability library.
-  //    We read installed_plugins.json (the authoritative source) and pass
-  //    each installPath explicitly. This does NOT load user settings.json
-  //    or user CLAUDE.md — only the plugin bundle contents.
-  try {
-    const raw = readFileSync(USER_PLUGIN_INSTALL_MANIFEST, "utf-8");
-    const manifest = JSON.parse(raw) as { plugins?: Record<string, InstalledPluginEntry[]> };
-    for (const [pluginKey, entries] of Object.entries(manifest.plugins ?? {})) {
-      // Each plugin may have multiple versions; take the most recent entry.
-      const latest = entries[entries.length - 1];
-      if (latest?.installPath) {
-        out.push({ type: "local", path: latest.installPath });
-        console.log(`[plugins] ${pluginKey} → ${latest.installPath}`);
-      }
-    }
-  } catch {
-    console.log(
-      `[plugins] No user plugin manifest at ${USER_PLUGIN_INSTALL_MANIFEST} ` +
-      `(this is fine if you don't have Claude Code plugins installed)`,
-    );
-  }
+  // Koda only loads plugins from ~/.koda/plugins/ — not from the operator's
+  // ~/.claude/plugins/. This prevents Claude Code plugin changes from
+  // accidentally affecting Koda, and avoids conflicts (e.g., the discord
+  // plugin giving the agent a second Discord path that sent DMs).
+  // To add a plugin for Koda: symlink it into ~/.koda/plugins/.
 
   console.log(`[plugins] Loaded ${out.length} plugin bundles`);
   return out;

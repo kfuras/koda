@@ -326,7 +326,7 @@ function startTickLoop(agent: KodaAgent, bot: KodaBot) {
       await agent.runIsolatedTask(
         "tick",
         tickPrompt,
-        { maxTurns: 3, maxBudgetUsd: 0.10 },
+        { maxTurns: 3, maxBudgetUsd: 0.25 },
         "claude-sonnet-4-6",
       );
       // Detect recovery: if we were in a failing state, announce recovery once.

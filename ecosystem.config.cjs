@@ -13,6 +13,7 @@ module.exports = {
     watch: false,
     autorestart: true,
     max_restarts: 10,
+    min_uptime: 30000,
     restart_delay: 5000,
     max_memory_restart: "1G",
     log_date_format: "YYYY-MM-DD HH:mm:ss",
