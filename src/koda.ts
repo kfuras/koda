@@ -26,6 +26,7 @@ import { runDoctor, description as doctorDesc } from "./commands/doctor.js";
 import { runSkills, description as skillsDesc } from "./commands/skills.js";
 import { runHealth, description as healthDesc } from "./commands/health.js";
 import { runInit, description as initDesc } from "./commands/init.js";
+import { runChat, description as chatDesc } from "./commands/chat.js";
 
 interface Command {
   description: string;
@@ -33,6 +34,7 @@ interface Command {
 }
 
 const COMMANDS: Record<string, Command> = {
+  chat:    { description: chatDesc,    run: runChat },
   init:    { description: initDesc,    run: runInit },
   status:  { description: statusDesc,  run: async () => runStatus() },
   update:  { description: updateDesc,  run: runUpdate },

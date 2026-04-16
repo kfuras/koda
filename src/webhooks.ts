@@ -70,6 +70,38 @@ export function startWebhookServer(agent: KodaAgent, bot: KodaBot): void {
       return;
     }
 
+    // Chat endpoint — send a message to the running agent, get a response
+    if (req.method === "POST" && req.url === "/chat") {
+      const body = await readBody(req);
+      let message: string;
+      try {
+        const parsed = JSON.parse(body) as { message?: string };
+        message = parsed.message ?? "";
+      } catch {
+        message = body.trim();
+      }
+
+      if (!message) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Missing message" }));
+        return;
+      }
+
+      // Send to agent, wait for response (timeout 5 min)
+      const timeout = setTimeout(() => {
+        res.writeHead(504, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Agent response timeout" }));
+      }, 300_000);
+
+      agent.send(`[CLI] ${message}`, (responseText, isError) => {
+        clearTimeout(timeout);
+        if (res.writableEnded) return; // timeout already fired
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ response: responseText, error: isError }));
+      });
+      return;
+    }
+
     if (req.method !== "POST" || req.url !== "/webhook/github") {
       res.writeHead(404);
       res.end();
