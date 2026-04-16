@@ -21,6 +21,7 @@ import {
 } from "./config.js";
 import { type KodaAgent } from "./agent.js";
 import { type AgentRegistry } from "./agent-registry.js";
+import { recallMemories } from "./active-memory.js";
 import { teleportSave } from "./teleport.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
@@ -494,9 +495,16 @@ export class KodaBot {
     // Frustration detection
     const frustrated = detectFrustration(content);
 
+    // Active memory — search past learnings/observations for relevant context
+    const recalled = await recallMemories(content);
+
     // Build message with username context
     const username = message.author.displayName || message.author.username;
     const promptParts: string[] = [];
+
+    if (recalled) {
+      promptParts.push(recalled);
+    }
 
     if (tokenBudget) {
       promptParts.push(
