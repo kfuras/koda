@@ -12,6 +12,7 @@ import { AGENT_DEFAULTS, KODA_HOME, DEFAULT_TASK_LIMITS, CONFIG } from "./config
 import { agentToolsServer } from "./tools/agent-tools.js";
 import { gscServer } from "./tools/gsc.js";
 import { delegateServer } from "./tools/delegate.js";
+import { evolveServer } from "./tools/evolve.js";
 import { stateFileQueue } from "./patterns.js";
 
 // --- Types ---
@@ -206,6 +207,7 @@ function getMcpServers() {
     // Built-in SDK servers (TypeScript, compiled in)
     "agent-tools": agentToolsServer,
     delegate: delegateServer,
+    evolve: evolveServer,
     gsc: gscServer,
     // External servers (loaded from mcp-servers.json)
     ...loadExternalMcpServers(),
