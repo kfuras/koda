@@ -8,14 +8,27 @@ import {
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
-import { SYSTEM_PROMPT, AGENT_DEFAULTS, KODA_HOME, DEFAULT_TASK_LIMITS } from "./config.js";
+import { AGENT_DEFAULTS, KODA_HOME, DEFAULT_TASK_LIMITS, CONFIG } from "./config.js";
 import { agentToolsServer } from "./tools/agent-tools.js";
 import { gscServer } from "./tools/gsc.js";
+import { delegateServer } from "./tools/delegate.js";
 import { stateFileQueue } from "./patterns.js";
 
 // --- Types ---
 
 export type ResponseCallback = (text: string, isError: boolean) => void;
+
+/** Per-agent configuration — provided by the AgentRegistry. */
+export interface AgentConfig {
+  id: string;
+  workspace: string;           // absolute path
+  systemPrompt: string;
+  model?: string;
+  maxTurns?: number;
+  maxBudgetUsd?: number;
+  mcpServerFilter?: string[];  // only load these MCP server keys (undefined = all)
+  subAgents?: Record<string, { description: string; prompt: string; model: string }>;
+}
 
 interface PendingMessage {
   userMessage: SDKUserMessage;
@@ -24,20 +37,19 @@ interface PendingMessage {
 
 // --- Session persistence ---
 
-const SESSION_FILE = resolve(KODA_HOME, "data/.koda-session-id");
-
-async function loadSessionId(): Promise<string | undefined> {
+async function loadSessionIdFrom(filePath: string): Promise<string | undefined> {
   try {
-    const id = (await readFile(SESSION_FILE, "utf-8")).trim();
+    const id = (await readFile(filePath, "utf-8")).trim();
     return id || undefined;
   } catch {
     return undefined;
   }
 }
 
-async function saveSessionId(id: string): Promise<void> {
-  await mkdir(resolve(KODA_HOME, "data"), { recursive: true });
-  await writeFile(SESSION_FILE, id, "utf-8");
+async function saveSessionIdTo(filePath: string, id: string): Promise<void> {
+  const dir = resolve(filePath, "..");
+  await mkdir(dir, { recursive: true });
+  await writeFile(filePath, id, "utf-8");
 }
 
 // --- Message queue ---
@@ -122,12 +134,25 @@ function classifyRisk(toolName: string): "LOW" | "MEDIUM" | "HIGH" {
 
 const MCP_SERVERS_FILE = resolve(KODA_HOME, "mcp-servers.json");
 
-interface ExternalMcpDef {
+interface StdioMcpDef {
   command: string;
   args: string[];
   env?: Record<string, string>;
   defaults?: Record<string, string>;
 }
+
+interface HttpMcpDef {
+  type: "http";
+  url: string;
+  headers?: Record<string, string>;
+  defaults?: Record<string, string>;
+}
+
+type ExternalMcpDef = StdioMcpDef | HttpMcpDef;
+
+type McpServerConfig =
+  | { command: string; args: string[]; env?: Record<string, string> }
+  | { type: "http"; url: string; headers?: Record<string, string> };
 
 function resolveEnvVar(value: string, defaults?: Record<string, string>): string {
   return value.replace(/\$([A-Z_]+)/g, (_match, varName: string) => {
@@ -135,22 +160,37 @@ function resolveEnvVar(value: string, defaults?: Record<string, string>): string
   });
 }
 
-function loadExternalMcpServers(): Record<string, { command: string; args: string[]; env?: Record<string, string> }> {
+function loadExternalMcpServers(): Record<string, McpServerConfig> {
   try {
     const raw = readFileSync(MCP_SERVERS_FILE, "utf-8");
     const defs: Record<string, ExternalMcpDef> = JSON.parse(raw);
-    const servers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
+    const servers: Record<string, McpServerConfig> = {};
 
     for (const [name, def] of Object.entries(defs)) {
-      servers[name] = {
-        command: resolveEnvVar(def.command, def.defaults),
-        args: def.args.map(a => resolveEnvVar(a, def.defaults)),
-        ...(def.env ? {
-          env: Object.fromEntries(
-            Object.entries(def.env).map(([k, v]) => [k, resolveEnvVar(v, def.defaults)]),
-          ),
-        } : {}),
-      };
+      if ("type" in def && def.type === "http") {
+        // HTTP MCP server (e.g., Notipo)
+        servers[name] = {
+          type: "http",
+          url: resolveEnvVar(def.url, def.defaults),
+          ...(def.headers ? {
+            headers: Object.fromEntries(
+              Object.entries(def.headers).map(([k, v]) => [k, resolveEnvVar(v, def.defaults)]),
+            ),
+          } : {}),
+        };
+      } else {
+        // stdio MCP server (command + args)
+        const stdio = def as StdioMcpDef;
+        servers[name] = {
+          command: resolveEnvVar(stdio.command, stdio.defaults),
+          args: stdio.args.map(a => resolveEnvVar(a, stdio.defaults)),
+          ...(stdio.env ? {
+            env: Object.fromEntries(
+              Object.entries(stdio.env).map(([k, v]) => [k, resolveEnvVar(v, stdio.defaults)]),
+            ),
+          } : {}),
+        };
+      }
     }
 
     console.log(`[mcp] Loaded ${Object.keys(servers).length} external servers: ${Object.keys(servers).join(", ")}`);
@@ -165,6 +205,7 @@ function getMcpServers() {
   return {
     // Built-in SDK servers (TypeScript, compiled in)
     "agent-tools": agentToolsServer,
+    delegate: delegateServer,
     gsc: gscServer,
     // External servers (loaded from mcp-servers.json)
     ...loadExternalMcpServers(),
@@ -273,24 +314,62 @@ export class KodaAgent {
   private sessionId: string | undefined;
   private onProgressCallback: ((taskName: string, text: string) => void) | null = null;
   private memoryState = createMemoryExtractionState();
+  private heartbeatTimer: NodeJS.Timeout | null = null;
+  private lastActivityMs = Date.now();
+
+  /** Agent identity and workspace config. */
+  readonly agentId: string;
+  private config: AgentConfig;
+
+  constructor(config?: AgentConfig) {
+    // Backward compatible: if no config, use legacy single-agent defaults
+    this.config = config ?? {
+      id: "home",
+      workspace: KODA_HOME,
+      systemPrompt: "", // will be set in start() via legacy path
+      model: AGENT_DEFAULTS.model,
+    };
+    this.agentId = this.config.id;
+  }
 
   async start(): Promise<void> {
-    this.sessionId = await loadSessionId();
+    const sessionFile = resolve(this.config.workspace, "data/.koda-session-id");
+    this.sessionId = await loadSessionIdFrom(sessionFile);
     this.running = true;
 
     const inputStream = this.createInputStream();
+
+    // Persistent session gets a high turn limit — it auto-compacts every 50
+    // turns and recovers from max_turns, so this is a safety ceiling, not a
+    // per-message budget. Complex tasks (3h video analysis, long research)
+    // need room to breathe.
+    const maxTurns = this.config.maxTurns ?? AGENT_DEFAULTS.maxTurns;
+    const persistentMaxTurns = Math.max(maxTurns, 200);
+    const model = this.config.model ?? AGENT_DEFAULTS.model;
+
+    // System prompt: use provided config, or fall back to legacy global
+    let systemPrompt = this.config.systemPrompt;
+    if (!systemPrompt) {
+      // Legacy: import SYSTEM_PROMPT from config.ts
+      const { SYSTEM_PROMPT } = await import("./config.js");
+      systemPrompt = SYSTEM_PROMPT;
+    }
+
+    const mcpServers = this.config.mcpServerFilter
+      ? filterMcpServers(getMcpServers(), this.config.mcpServerFilter)
+      : getMcpServers();
 
     this.queryInstance = query({
       prompt: inputStream,
       options: {
         abortController: this.abortController,
-        systemPrompt: SYSTEM_PROMPT,
+        systemPrompt,
         tools: { type: "preset", preset: "claude_code" },
-        model: AGENT_DEFAULTS.model,
-        maxTurns: AGENT_DEFAULTS.maxTurns,
+        model,
+        maxTurns: persistentMaxTurns,
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
-        agents: {
+        agents: this.config.subAgents ?? {
           researcher: {
             description: "Research agent for gathering information, scanning trends, reading docs, and web searches. Use for the research phase of complex tasks.",
             prompt: "You are a research agent. Gather information thoroughly. Return structured findings. Do not take actions — only research and report.",
@@ -309,7 +388,7 @@ export class KodaAgent {
             tools: ["Read", "Glob", "Grep", "Bash"],
           },
         },
-        cwd: KODA_HOME,
+        cwd: this.config.workspace,
         // Load Claude Code plugins (skills/commands/agents) via the dedicated
         // `plugins` API instead of `settingSources`. This gives Koda access to
         // the ecosystem (compound-engineering, feature-dev, document-skills,
@@ -317,15 +396,18 @@ export class KodaAgent {
         // ~/.claude/workspace/ state. See discoverPlugins() above for why.
         plugins: discoverPlugins(),
         ...(this.sessionId ? { resume: this.sessionId } : {}),
-        mcpServers: getMcpServers(),
+        mcpServers,
       },
     });
+
+    console.log(`[agent:${this.agentId}] Started (model: ${model}, workspace: ${this.config.workspace})`);
 
     // Process output stream in background
     void this.processOutput();
   }
 
   send(text: string, onResponse: ResponseCallback): void {
+    this.lastActivityMs = Date.now();
     this.sendRaw({ role: "user", content: text }, onResponse);
   }
 
@@ -345,6 +427,7 @@ export class KodaAgent {
 
   async stop(): Promise<void> {
     this.running = false;
+    this.stopCacheHeartbeat();
     this.abortController.abort();
   }
 
@@ -363,22 +446,31 @@ export class KodaAgent {
     const controller = new AbortController();
 
     // Create a one-shot prompt (no streaming input)
+    // Use agent-specific system prompt if available, else fall back to legacy
+    let systemPrompt = this.config.systemPrompt;
+    if (!systemPrompt) {
+      const { SYSTEM_PROMPT } = await import("./config.js");
+      systemPrompt = SYSTEM_PROMPT;
+    }
+
+    const mcpServers = this.config.mcpServerFilter
+      ? filterMcpServers(getMcpServers(), this.config.mcpServerFilter)
+      : getMcpServers();
+
     const taskQuery = query({
       prompt: prompt,
       options: {
         abortController: controller,
-        systemPrompt: SYSTEM_PROMPT,
+        systemPrompt,
         tools: { type: "preset", preset: "claude_code" },
-        model: modelOverride ?? AGENT_DEFAULTS.model,
+        model: modelOverride ?? this.config.model ?? AGENT_DEFAULTS.model,
         maxTurns: limits.maxTurns,
         maxBudgetUsd: limits.maxBudgetUsd,
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
-        cwd: KODA_HOME,
-        // Same as the persistent session: plugins via explicit paths, no
-        // settingSources, no user CLAUDE.md or workspace leakage.
+        cwd: this.config.workspace,
         plugins: discoverPlugins(),
-        mcpServers: getMcpServers(),
+        mcpServers,
       },
     });
 
@@ -387,6 +479,7 @@ export class KodaAgent {
     let totalTurns = 0;
     let isError = false;
     let lastToolName = "";
+    const MAX_CONTINUATIONS = 2;
 
     // 30s progress summaries — post periodic updates for long tasks
     const PROGRESS_INTERVAL_MS = 30_000;
@@ -398,40 +491,85 @@ export class KodaAgent {
       }
     }, PROGRESS_INTERVAL_MS);
 
+    let currentQuery = taskQuery;
+    let continuations = 0;
+
     try {
-      for await (const message of taskQuery) {
-        if (message.type === "result") {
-          const result = message as SDKResultMessage;
-          totalCost = result.total_cost_usd ?? 0;
-          totalTurns = result.num_turns ?? 0;
-          isError = result.subtype !== "success";
+      while (true) {
+        let hitMaxTurns = false;
 
-          if (result.subtype === "success") {
-            resultText = (result as unknown as { result: string }).result || resultText;
-          } else {
-            const errors = (result as unknown as { errors?: string[] }).errors;
-            resultText = `Task error (${result.subtype}): ${errors?.join(", ") ?? "unknown"}`;
-          }
-        } else if (message.type === "assistant") {
-          const assistantMsg = message as SDKAssistantMessage;
-          const content = assistantMsg.message?.content ?? [];
+        for await (const message of currentQuery) {
+          if (message.type === "result") {
+            const result = message as SDKResultMessage;
+            totalCost += result.total_cost_usd ?? 0;
+            totalTurns += result.num_turns ?? 0;
 
-          // Track last tool use for progress summaries
-          for (const block of content) {
-            if ((block as { type: string }).type === "tool_use") {
-              lastToolName = (block as { type: string; name?: string }).name ?? "working";
+            if (result.subtype === "success") {
+              isError = false;
+              resultText = (result as unknown as { result: string }).result || resultText;
+            } else if (result.subtype === "error_max_turns") {
+              hitMaxTurns = true;
+            } else {
+              isError = true;
+              const errors = (result as unknown as { errors?: string[] }).errors;
+              resultText = `Task error (${result.subtype}): ${errors?.join(", ") ?? "unknown"}`;
+            }
+          } else if (message.type === "assistant") {
+            const assistantMsg = message as SDKAssistantMessage;
+            const content = assistantMsg.message?.content ?? [];
+
+            for (const block of content) {
+              if ((block as { type: string }).type === "tool_use") {
+                lastToolName = (block as { type: string; name?: string }).name ?? "working";
+              }
+            }
+
+            const textBlocks = content.filter(
+              (b: { type: string }) => b.type === "text",
+            );
+            if (textBlocks.length > 0) {
+              resultText = textBlocks
+                .map((b: { type: string; text?: string }) => b.text ?? "")
+                .join("\n");
             }
           }
-
-          const textBlocks = content.filter(
-            (b: { type: string }) => b.type === "text",
-          );
-          if (textBlocks.length > 0) {
-            resultText = textBlocks
-              .map((b: { type: string; text?: string }) => b.text ?? "")
-              .join("\n");
-          }
         }
+
+        // If max_turns hit, continue with a fresh query (up to MAX_CONTINUATIONS)
+        if (hitMaxTurns && continuations < MAX_CONTINUATIONS) {
+          continuations++;
+          const remainingBudget = Math.max(0.5, limits.maxBudgetUsd - totalCost);
+          console.log(
+            `[task:${taskName}] max_turns reached — continuation ${continuations}/${MAX_CONTINUATIONS} ($${totalCost.toFixed(2)} spent)`,
+          );
+
+          currentQuery = query({
+            prompt: `You were working on the task "${taskName}" but hit the turn limit. Here is your progress so far:\n\n${resultText.slice(-2000)}\n\nContinue where you left off and finish the task. Do NOT restart from the beginning.`,
+            options: {
+              abortController: controller,
+              systemPrompt: systemPrompt,
+              tools: { type: "preset", preset: "claude_code" },
+              model: modelOverride ?? this.config.model ?? AGENT_DEFAULTS.model,
+              maxTurns: limits.maxTurns,
+              maxBudgetUsd: remainingBudget,
+              permissionMode: "bypassPermissions",
+              allowDangerouslySkipPermissions: true,
+              cwd: this.config.workspace,
+              plugins: discoverPlugins(),
+              mcpServers,
+            },
+          });
+          isError = false;
+          continue;
+        }
+
+        // If we still hit max_turns after all continuations, mark as error
+        if (hitMaxTurns) {
+          isError = true;
+          resultText = `Task exhausted ${MAX_CONTINUATIONS + 1} rounds (${totalTurns} total turns). Last output:\n${resultText}`;
+        }
+
+        break;
       }
     } catch (err) {
       resultText = `Task crashed: ${err instanceof Error ? err.message : String(err)}`;
@@ -441,7 +579,7 @@ export class KodaAgent {
     }
 
     console.log(
-      `[task:${taskName}] ${isError ? "FAILED" : "OK"} (${totalTurns} turns, $${totalCost.toFixed(2)}, limit: ${limits.maxTurns}t/$${limits.maxBudgetUsd})`,
+      `[task:${taskName}] ${isError ? "FAILED" : "OK"} (${totalTurns} turns, $${totalCost.toFixed(2)}, limit: ${limits.maxTurns}t/$${limits.maxBudgetUsd}${continuations > 0 ? `, ${continuations} cont.` : ""})`,
     );
 
     return { text: resultText, cost: totalCost, turns: totalTurns, isError };
@@ -450,6 +588,49 @@ export class KodaAgent {
   /** Set a callback for progress updates during long-running tasks. */
   setProgressCallback(cb: (taskName: string, text: string) => void): void {
     this.onProgressCallback = cb;
+  }
+
+  /**
+   * Start cache heartbeat — sends a lightweight keep-alive every intervalMs
+   * to prevent Anthropic's prompt cache from expiring (1hr TTL).
+   * Only sends if the agent has been idle (no real messages) for at least
+   * half the interval, avoiding unnecessary pings during active use.
+   *
+   * From OpenClaw: cache reads are dramatically cheaper than cache writes,
+   * so keeping the cache warm saves real money on long-running agents.
+   */
+  startCacheHeartbeat(intervalMs = 55 * 60_000): void {
+    if (this.heartbeatTimer) return; // already running
+
+    this.heartbeatTimer = setInterval(() => {
+      const idleMs = Date.now() - this.lastActivityMs;
+      // Only ping if idle for at least half the interval
+      if (idleMs < intervalMs / 2) {
+        return;
+      }
+
+      console.log(`[heartbeat:${this.agentId}] Cache keep-alive (idle ${Math.round(idleMs / 60_000)}min)`);
+      this.messageQueue.push({
+        userMessage: {
+          type: "user",
+          session_id: this.sessionId ?? "",
+          message: {
+            role: "user",
+            content: "[SYSTEM: Cache heartbeat — no action needed. Reply with a single period.]",
+          },
+          parent_tool_use_id: null,
+        },
+        onResponse: () => {}, // discard response
+      });
+    }, intervalMs);
+  }
+
+  /** Stop the cache heartbeat timer. */
+  stopCacheHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
   }
 
   /**
@@ -583,7 +764,7 @@ export class KodaAgent {
         // Save session ID from first message
         if ("session_id" in message && message.session_id && !this.sessionId) {
           this.sessionId = message.session_id as string;
-          await saveSessionId(this.sessionId);
+          await saveSessionIdTo(resolve(this.config.workspace, "data/.koda-session-id"), this.sessionId);
           console.log(`[agent] Session: ${this.sessionId}`);
         }
 
@@ -639,13 +820,20 @@ export class KodaAgent {
           // Save session ID
           if (result.session_id) {
             this.sessionId = result.session_id;
-            await saveSessionId(this.sessionId);
+            await saveSessionIdTo(resolve(this.config.workspace, "data/.koda-session-id"), this.sessionId);
           }
 
-          // Deliver response
-          if (this.currentCallback) {
-            this.currentCallback(responseText, result.is_error);
-            this.currentCallback = null;
+          // Deliver response — but suppress error delivery for max_turns
+          // since we'll recover and re-queue a continuation
+          const savedCallback = this.currentCallback;
+          if (savedCallback) {
+            if (result.subtype === "error_max_turns") {
+              // Don't deliver error to Discord — stash callback for recovery
+              this.currentCallback = null;
+            } else {
+              savedCallback(responseText, result.is_error);
+              this.currentCallback = null;
+            }
           }
 
           // Extract memories from conversation (background, best-effort)
@@ -686,14 +874,13 @@ export class KodaAgent {
           // Auto-recover from max_turns or other fatal errors
           if (result.subtype !== "success") {
             if (result.subtype === "error_max_turns" && this.sessionId) {
-              // max_turns: try compaction first, then resume with existing session
-              console.log(`[agent] max_turns reached — compacting and resuming session`);
+              // max_turns: compact, resume, then tell the agent to continue
+              console.log(`[agent] max_turns reached — compacting and continuing`);
               this.turnsSinceCompact = 0;
               this.abortController = new AbortController();
               try {
-                // Resume with same session (don't clear sessionId!)
                 await this.start();
-                // Immediately request compaction
+                // Compact first, then continue the interrupted work
                 this.messageQueue.push({
                   userMessage: {
                     type: "user",
@@ -705,7 +892,20 @@ export class KodaAgent {
                     console.log("[agent] Post-recovery compaction complete");
                   },
                 });
-                console.log("[agent] Resumed session after max_turns with compaction");
+                // Re-queue a continuation so the agent finishes what it was doing
+                this.messageQueue.push({
+                  userMessage: {
+                    type: "user",
+                    session_id: this.sessionId ?? "",
+                    message: {
+                      role: "user",
+                      content: `[SYSTEM: You hit the turn limit while working. Continue where you left off and finish. Your last output was: ${currentText.slice(-500) || "(none)"}]`,
+                    },
+                    parent_tool_use_id: null,
+                  },
+                  onResponse: savedCallback ?? (() => {}),
+                });
+                console.log("[agent] Resumed session after max_turns — continuation queued");
               } catch (resumeErr) {
                 // Resume failed — fall through to fresh session
                 console.error("[agent] Resume failed, creating fresh session:", resumeErr);
@@ -779,4 +979,21 @@ export class KodaAgent {
       }
     }
   }
+}
+
+// --- MCP server filtering ---
+
+/** Filter MCP servers to only include the specified keys. */
+function filterMcpServers<T extends Record<string, unknown>>(
+  allServers: T,
+  allowedKeys: string[],
+): T {
+  const allowed = new Set(allowedKeys);
+  const filtered = {} as Record<string, unknown>;
+  for (const [key, value] of Object.entries(allServers)) {
+    if (allowed.has(key)) {
+      filtered[key] = value;
+    }
+  }
+  return filtered as T;
 }

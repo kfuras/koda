@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { resolve } from "node:path";
 import { type KodaAgent } from "./agent.js";
 import { type KodaBot } from "./bot.js";
+import { type AgentRegistry } from "./agent-registry.js";
 import { KODA_HOME, TICK_INTERVAL_MS, DAILY_BUDGET_USD, CONFIG } from "./config.js";
 import { observeTaskResult } from "./runtime.js";
 import { stateFileQueue, taskCircuitBreaker, sessionRegistry } from "./patterns.js";
@@ -22,6 +23,8 @@ interface TaskDef {
   timeout?: number;
   chain?: string;
   limits?: { maxTurns: number; maxBudgetUsd: number };
+  agentId?: string;  // route to specific agent (default = home)
+  model?: string;    // model override per task
 }
 
 interface TaskResult {
@@ -542,7 +545,7 @@ async function executeTask(
   const fullPrompt =
     `[SCHEDULED TASK: ${name}] ${task.prompt}\n\nToday's date: ${date}`;
 
-  const result = await agent.runIsolatedTask(name, fullPrompt, task.limits);
+  const result = await agent.runIsolatedTask(name, fullPrompt, task.limits, task.model);
 
   trackCost(result.cost);
 
@@ -552,10 +555,11 @@ async function executeTask(
     await saveResult(date, name, { status: "ok", timestamp: timestamp() });
     await logToFile(name, `OK ($${result.cost.toFixed(2)}, ${result.turns}t) — ${result.text.slice(0, 200)}`);
 
+    const agentLabel = task.agentId ? `${name} → ${task.agentId}` : name;
     if (task.type === "approval") {
-      await bot.sendApproval(name, result.text);
+      await bot.sendApproval(agentLabel, result.text);
     } else if (result.text.length > 10) {
-      await bot.sendToChannel(`**[${name}]**\n\n${result.text}`);
+      await bot.sendToChannel(`**[${agentLabel}]**\n\n${result.text}`);
     }
 
     await observeTaskResult(name, true, result.cost, result.turns, result.text);
@@ -599,13 +603,25 @@ async function executeTask(
 
 // --- Scheduler ---
 
-export function startScheduler(agent: KodaAgent, bot: KodaBot): void {
+export function startScheduler(agent: KodaAgent, bot: KodaBot, registry?: AgentRegistry): void {
   console.log(`Scheduling ${Object.keys(TASKS).length} tasks from ~/.koda/tasks.json`);
 
   // Log progress to console only (no Discord spam)
   agent.setProgressCallback((taskName, text) => {
     console.log(`[${taskName}] ${text}`);
   });
+
+  // Set progress callback on all agents in registry
+  if (registry) {
+    for (const agentId of registry.getAgentIds()) {
+      const a = registry.getAgent(agentId);
+      if (a && a !== agent) {
+        a.setProgressCallback((taskName, text) => {
+          console.log(`[${taskName}] ${text}`);
+        });
+      }
+    }
+  }
 
   // Clean up stale sessions from previous run
   void sessionRegistry.cleanupStale();
@@ -614,12 +630,15 @@ export function startScheduler(agent: KodaAgent, bot: KodaBot): void {
   void detectMissedTasks(TASKS, agent, bot);
 
   for (const [name, task] of Object.entries(TASKS)) {
+    // Resolve which agent runs this task
+    const taskAgent = (task.agentId ? registry?.getAgent(task.agentId) : undefined) ?? agent;
+
     cron.schedule(task.cron, () => {
-      void executeTask(name, task, agent, bot);
+      void executeTask(name, task, taskAgent, bot);
     }, {
       timezone: "Europe/Oslo",
     });
-    console.log(`  ${name}: ${task.cron}`);
+    console.log(`  ${name}: ${task.cron}${task.agentId ? ` → ${task.agentId}` : ""}`);
   }
 
   // Daily digest — 21:00

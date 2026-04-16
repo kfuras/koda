@@ -9,6 +9,8 @@ import { setupVoiceCommands } from "./voice.js";
 import { KODA_HOME } from "./config.js";
 import { checkIncomingTeleport } from "./teleport.js";
 import { checkMemoryFreshness } from "./runtime.js";
+import { createRegistryFromConfig, type AgentRegistry } from "./agent-registry.js";
+import { setDelegateRegistry } from "./tools/delegate.js";
 
 /**
  * Read the restart reason persisted by restart_self, if any.
@@ -72,57 +74,99 @@ process.on("unhandledRejection", (err) => {
   console.error("[unhandled]", err);
 });
 
+async function bootAgents(registry: AgentRegistry): Promise<void> {
+  const agentIds = registry.getAgentIds();
+  const defaultId = registry.getDefaultAgentId();
+  console.log(`[boot] Starting ${agentIds.length} agent(s): ${agentIds.join(", ")}`);
+
+  // Build sub-agent definitions (researcher/implementer/verifier for home agent)
+  const subAgents = registry.buildSubAgentDefs();
+
+  for (const agentId of agentIds) {
+    const def = registry.getDef(agentId)!;
+    const systemPrompt = registry.buildSystemPrompt(agentId);
+    const isHome = agentId === defaultId;
+
+    const agent = new KodaAgent({
+      id: agentId,
+      workspace: def.workspace,
+      systemPrompt,
+      model: def.model,
+      maxTurns: def.maxTurns,
+      maxBudgetUsd: def.maxBudgetUsd,
+      mcpServerFilter: def.mcpServers,
+      // Only the home agent gets sub-agent delegation capabilities
+      subAgents: isHome ? subAgents : undefined,
+    });
+
+    await agent.start();
+    registry.registerAgent(agentId, agent);
+  }
+}
+
 async function main() {
   console.log("Starting Koda agent...");
 
-  // 1. Start persistent agent session
-  const agent = new KodaAgent();
-  await agent.start();
+  // 1. Build agent registry from config
+  const registry = createRegistryFromConfig();
 
-  // 2. Start Discord bot (feeds messages into agent)
-  const bot = new KodaBot(agent);
+  // 2. Start all agents
+  await bootAgents(registry);
+
+  // 3. Inject registry into delegation tool so home agent can delegate
+  setDelegateRegistry(registry);
+
+  // 4. Start cache heartbeat on all agents (55min keep-alive, prevents Anthropic cache expiry)
+  for (const agentId of registry.getAgentIds()) {
+    registry.getAgent(agentId)?.startCacheHeartbeat();
+  }
+
+  // 5. Get the default agent (for backward-compatible single-agent paths)
+  const defaultAgent = registry.getAgent(registry.getDefaultAgentId())!;
+
+  // 4. Start Discord bot (routes messages to agents via registry)
+  const bot = new KodaBot(defaultAgent, registry);
   await bot.start();
 
-  // 3. Start scheduler (feeds tasks into agent via bot)
-  startScheduler(agent, bot);
+  // 5. Start scheduler (routes tasks to agents via registry)
+  startScheduler(defaultAgent, bot, registry);
 
-  // 4. Start GitHub webhook listener
-  startWebhookServer(agent, bot);
+  // 6. Start GitHub webhook listener
+  startWebhookServer(defaultAgent, bot);
 
-  // 5. Setup voice channel commands
-  setupVoiceCommands(bot, agent);
+  // 7. Setup voice channel commands
+  setupVoiceCommands(bot, defaultAgent);
 
-  // 6. Check for incoming teleport from CLI
+  // 8. Check for incoming teleport from CLI
   await checkIncomingTeleport((text) => {
-    agent.send(text, async (response) => {
+    defaultAgent.send(text, async (response) => {
       await bot.sendToChannel(`**[teleport]** Resumed from CLI context:\n\n${response}`);
     });
   });
 
-  // 7. Check memory freshness and warn agent
+  // 9. Check memory freshness and warn agent
   const freshnessWarning = await checkMemoryFreshness();
   if (freshnessWarning) {
     console.log(`[freshness] ${freshnessWarning}`);
-    agent.send(
+    defaultAgent.send(
       `[SYSTEM: Memory freshness check]\n${freshnessWarning}`,
       () => {},
     );
   }
 
-  // 8. Announce we're online — include the restart reason if one was persisted
-  //    by restart_self, and surface skill count so the operator has visible
-  //    feedback that the restart completed and the new state loaded.
+  // 10. Announce we're online
   const restartReason = await consumeRestartReason();
-  await bot.sendStartupMessage(restartReason);
+  const agentCount = registry.getAgentIds().length;
+  await bot.sendStartupMessage(restartReason, agentCount);
 
-  // 8. Hot-reload config files (tasks.json, mcp-servers.json)
+  // 11. Hot-reload config files (tasks.json, mcp-servers.json)
   startFileWatcher(bot);
 
   // Graceful shutdown
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, async () => {
       console.log(`Received ${signal}, shutting down...`);
-      await agent.stop();
+      await registry.stopAll();
       bot.getClient().destroy();
       process.exit(0);
     });

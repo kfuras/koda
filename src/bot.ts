@@ -20,6 +20,7 @@ import {
   KODA_HOME,
 } from "./config.js";
 import { type KodaAgent } from "./agent.js";
+import { type AgentRegistry } from "./agent-registry.js";
 import { teleportSave } from "./teleport.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
@@ -138,15 +139,17 @@ async function downloadAttachmentAsBase64(
 
 export class KodaBot {
   private client: Client;
-  private agent: KodaAgent;
+  private agent: KodaAgent; // default agent (backward compat)
+  private registry: AgentRegistry | null;
   private approvalMessages = new Map<string, string>(); // messageId → taskName
   private lastUserActivity = 0; // timestamp of last user message
   private userIdleThresholdMs = 15 * 60_000; // 15 min = idle
   private lastMessageTime = new Map<string, number>(); // userId → timestamp (rate limiting)
   private startTime = Date.now();
 
-  constructor(agent: KodaAgent) {
+  constructor(agent: KodaAgent, registry?: AgentRegistry) {
     this.agent = agent;
+    this.registry = registry ?? null;
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
@@ -169,7 +172,7 @@ export class KodaBot {
     await this.client.login(DISCORD_BOT_TOKEN);
   }
 
-  async sendStartupMessage(reason?: string): Promise<void> {
+  async sendStartupMessage(reason?: string, agentCount?: number): Promise<void> {
     // Fall through the same channel hierarchy as sendProactive so that
     // startup messages reach wherever the operator expects announcements.
     // If nothing resolves, log loudly instead of silently returning —
@@ -212,7 +215,8 @@ export class KodaBot {
     if (reason) {
       lines.push(`Reason: ${reason}`);
     }
-    lines.push(`${skillCount} skills loaded. Ready for tasks.`);
+    const agentLine = agentCount && agentCount > 1 ? ` ${agentCount} agents,` : "";
+    lines.push(`${agentLine} ${skillCount} skills loaded. Ready for tasks.`);
 
     try {
       const channel = await this.client.channels.fetch(channelId) as TextChannel | null;
@@ -393,6 +397,23 @@ export class KodaBot {
     );
   }
 
+  /** Resolve which agent handles this Discord message via bindings. */
+  private resolveTargetAgent(message: Message): KodaAgent {
+    if (!this.registry) return this.agent;
+
+    const channelId = message.channel.isThread() && message.channel.parentId
+      ? message.channel.parentId  // route threads to parent channel's agent
+      : message.channelId;
+
+    const agentId = this.registry.routeMessage({
+      channel: "discord",
+      channelId,
+      userId: message.author.id,
+    });
+
+    return this.registry.getAgent(agentId) ?? this.agent;
+  }
+
   private setupHandlers(): void {
     this.client.once("ready", () => {
       console.log(`Discord bot logged in as ${this.client.user?.tag}`);
@@ -518,6 +539,10 @@ export class KodaBot {
       }
     }
 
+    // Route to the correct agent via bindings
+    const targetAgent = this.resolveTargetAgent(message);
+    const agentTag = targetAgent.agentId !== "home" ? targetAgent.agentId : undefined;
+
     // Send to agent
     if (imageContents.length > 0) {
       // Multi-modal message with images
@@ -531,22 +556,22 @@ export class KodaBot {
       }
       messageContent.push(...imageContents);
 
-      this.agent.sendRaw(
+      targetAgent.sendRaw(
         {
           role: "user",
           content: messageContent,
         },
         async (responseText, isError) => {
           clearInterval(typing);
-          await this.sendReply(message, responseText, isError);
+          await this.sendReply(message, responseText, isError, agentTag);
         },
       );
     } else {
-      this.agent.send(
+      targetAgent.send(
         promptParts.join("\n"),
         async (responseText, isError) => {
           clearInterval(typing);
-          await this.sendReply(message, responseText, isError);
+          await this.sendReply(message, responseText, isError, agentTag);
         },
       );
     }
@@ -556,8 +581,10 @@ export class KodaBot {
     message: Message,
     text: string,
     _isError: boolean,
+    agentTag?: string,
   ): Promise<void> {
-    const reply = text || "(no response)";
+    const prefix = agentTag ? `**[${agentTag}]** ` : "";
+    const reply = prefix + (text || "(no response)");
 
     // Extract file paths from response
     const filePaths = extractFilePaths(reply);
