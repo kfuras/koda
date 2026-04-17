@@ -444,8 +444,8 @@ async function detectMissedTasks(
   const missedTasks: Array<{ name: string; task: TaskDef; hour: number; minute: number }> = [];
 
   for (const [name, task] of Object.entries(tasks)) {
-    // Skip if already ran today
-    if (results[name]?.status === "ok" || results[name]?.status === "healed") continue;
+    // Skip if already ran today (any terminal status — ok, healed, failed, exhausted)
+    if (results[name]) continue;
 
     // Parse cron to see if it should have fired today before now
     try {
@@ -526,8 +526,8 @@ async function executeTask(
   }
 
   const results = await loadResults(date);
-  if (results[name]?.status === "ok" || results[name]?.status === "healed") {
-    console.log(`[${date}] Skipping ${name} — already completed today`);
+  if (results[name] && retryCount === 0) {
+    console.log(`[${date}] Skipping ${name} — already ran today (${results[name].status})`);
     return;
   }
 

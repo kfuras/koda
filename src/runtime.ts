@@ -98,15 +98,19 @@ export async function observeTaskResult(
   const isPublish = publishKeywords.some(k => summary.toLowerCase().includes(k));
 
   if (success && isPublish) {
-    // Try to extract URL from response
+    // Try to extract a real URL or content ID from the response.
+    // Only queue outcomes when we have something checkable — never fall back
+    // to the task name, which creates uncheckable phantom entries that waste
+    // cycles every outcome_check run.
     const urlMatch = summary.match(/https?:\/\/[^\s)]+/);
-    const contentType = detectContentType(taskName, summary);
-    if (contentType) {
-      await autoTrackOutcome(
-        contentType,
-        urlMatch?.[0] ?? taskName,
-        summary.slice(0, 200),
-      );
+    const hexIdMatch = summary.match(/\b[0-9a-f]{20,}\b/);
+    const contentId = urlMatch?.[0] ?? hexIdMatch?.[0];
+
+    if (contentId) {
+      const contentType = detectContentType(taskName, summary);
+      if (contentType) {
+        await autoTrackOutcome(contentType, contentId, summary.slice(0, 200));
+      }
     }
   }
 }
