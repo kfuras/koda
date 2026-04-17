@@ -857,18 +857,40 @@ export class KodaAgent {
           );
 
           // Proactive context compaction every 50 turns
+          // OpenClaw pattern: inject a silent memory flush BEFORE compaction
+          // so the agent saves important context to disk before it's lost
           if (result.subtype === "success" && this.turnsSinceCompact >= 50) {
-            console.log("[agent] Proactive compaction — context getting large");
+            console.log(`[agent:${this.agentId}] Context nearing limit — silent memory flush then compact`);
             this.turnsSinceCompact = 0;
+
+            // Phase 1: Silent memory flush — agent saves durable notes
             this.messageQueue.push({
               userMessage: {
                 type: "user",
                 session_id: this.sessionId ?? "",
-                message: { role: "user", content: "/compact" },
+                message: {
+                  role: "user",
+                  content: `[SYSTEM: Session nearing compaction. Save any important context now. ` +
+                    `Write durable notes to ${this.config.workspace}/data/daily-logs/${new Date().toISOString().slice(0, 10)}.md — ` +
+                    `include key decisions, in-progress work, and anything you'd need to remember after compaction. ` +
+                    `Reply with just "." when done — do NOT send a long response.]`,
+                },
                 parent_tool_use_id: null,
               },
               onResponse: () => {
-                console.log("[agent] Compaction complete");
+                console.log(`[agent:${this.agentId}] Memory flush complete — compacting`);
+                // Phase 2: Compact after flush
+                this.messageQueue.push({
+                  userMessage: {
+                    type: "user",
+                    session_id: this.sessionId ?? "",
+                    message: { role: "user", content: "/compact" },
+                    parent_tool_use_id: null,
+                  },
+                  onResponse: () => {
+                    console.log(`[agent:${this.agentId}] Compaction complete`);
+                  },
+                });
               },
             });
           }
