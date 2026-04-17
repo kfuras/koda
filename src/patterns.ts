@@ -1,9 +1,10 @@
 /**
- * Reusable patterns extracted from Claude Code architecture.
+ * Reusable patterns extracted from Claude Code + OpenClaw architecture.
  *
  * - AsyncQueue: sequential execution wrapper (FIFO, prevents race conditions)
  * - CircuitBreaker: stop retrying after N consecutive failures
  * - SessionRegistry: track active sessions, prevent duplicate execution
+ * - PersistentDedup: claim/commit/release dedup with in-memory LRU + disk persistence
  */
 
 import { writeFile, readFile, mkdir, readdir, unlink } from "node:fs/promises";
@@ -225,3 +226,139 @@ export class SessionRegistry {
 }
 
 export const sessionRegistry = new SessionRegistry();
+
+// ---------------------------------------------------------------------------
+// 4. PersistentDedup — claim/commit/release with LRU + disk persistence
+//    From OpenClaw's 3-tier dedup: in-memory LRU → persistent JSON → claimable
+// ---------------------------------------------------------------------------
+
+const DEDUP_DIR = resolve(KODA_HOME, "data/.dedup");
+
+interface DedupEntry {
+  timestamp: number;
+  status: "committed" | "inflight";
+}
+
+export class PersistentDedup {
+  private cache = new Map<string, DedupEntry>();
+  private namespace: string;
+  private ttlMs: number;
+  private maxSize: number;
+  private filePath: string;
+  private dirty = false;
+
+  /**
+   * @param namespace  Dedup namespace (e.g., "skool", "x-posts", "blog")
+   * @param ttlMs     How long entries stay valid (default 90 days)
+   * @param maxSize   Max entries in memory (default 500)
+   */
+  constructor(namespace: string, ttlMs = 90 * 86_400_000, maxSize = 500) {
+    this.namespace = namespace;
+    this.ttlMs = ttlMs;
+    this.maxSize = maxSize;
+    this.filePath = resolve(DEDUP_DIR, `${namespace}.json`);
+  }
+
+  /** Load from disk on startup. Call once before using. */
+  async warmup(): Promise<void> {
+    try {
+      const data = await readFile(this.filePath, "utf-8");
+      const entries: Record<string, number> = JSON.parse(data);
+      const now = Date.now();
+      for (const [key, ts] of Object.entries(entries)) {
+        if (now - ts < this.ttlMs) {
+          this.cache.set(key, { timestamp: ts, status: "committed" });
+        }
+      }
+      console.log(`[dedup:${this.namespace}] Warmed up ${this.cache.size} entries from disk`);
+    } catch {
+      // No file yet — fresh start
+    }
+  }
+
+  /**
+   * Check if a key is a duplicate.
+   * Returns: "duplicate" | "inflight" | "available"
+   */
+  check(key: string): "duplicate" | "inflight" | "available" {
+    const entry = this.cache.get(key);
+    if (!entry) return "available";
+    if (Date.now() - entry.timestamp > this.ttlMs) {
+      this.cache.delete(key);
+      return "available";
+    }
+    return entry.status === "inflight" ? "inflight" : "duplicate";
+  }
+
+  /**
+   * Claim a key for processing. Returns true if claimed, false if duplicate/inflight.
+   * Claimed keys are marked "inflight" — call commit() when done, or release() to unclaim.
+   */
+  claim(key: string): boolean {
+    const status = this.check(key);
+    if (status !== "available") return false;
+
+    this.cache.set(key, { timestamp: Date.now(), status: "inflight" });
+    this.prune();
+    return true;
+  }
+
+  /** Commit a claimed key — marks it as permanently deduplicated. */
+  commit(key: string): void {
+    this.cache.set(key, { timestamp: Date.now(), status: "committed" });
+    this.dirty = true;
+  }
+
+  /** Release a claimed key — removes inflight status (e.g., task failed). */
+  release(key: string): void {
+    const entry = this.cache.get(key);
+    if (entry?.status === "inflight") {
+      this.cache.delete(key);
+    }
+  }
+
+  /** Flush committed entries to disk. Call periodically or after commits. */
+  async flush(): Promise<void> {
+    if (!this.dirty) return;
+    await mkdir(DEDUP_DIR, { recursive: true });
+
+    const entries: Record<string, number> = {};
+    const now = Date.now();
+    for (const [key, entry] of this.cache) {
+      if (entry.status === "committed" && now - entry.timestamp < this.ttlMs) {
+        entries[key] = entry.timestamp;
+      }
+    }
+
+    await writeFile(this.filePath, JSON.stringify(entries, null, 2));
+    this.dirty = false;
+  }
+
+  /** Remove oldest entries if over maxSize. */
+  private prune(): void {
+    if (this.cache.size <= this.maxSize) return;
+
+    const sorted = [...this.cache.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp);
+    const toRemove = sorted.slice(0, this.cache.size - this.maxSize);
+    for (const [key] of toRemove) {
+      this.cache.delete(key);
+    }
+  }
+
+  /** Get all committed keys (for diagnostics). */
+  keys(): string[] {
+    return [...this.cache.entries()]
+      .filter(([, e]) => e.status === "committed")
+      .map(([k]) => k);
+  }
+
+  /** Number of entries. */
+  get size(): number {
+    return this.cache.size;
+  }
+}
+
+// Shared dedup instances per content domain
+export const contentDedup = new PersistentDedup("content", 90 * 86_400_000, 500);
+export const socialDedup = new PersistentDedup("social", 30 * 86_400_000, 300);
+export const skoolDedup = new PersistentDedup("skool", 90 * 86_400_000, 200);

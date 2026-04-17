@@ -11,6 +11,7 @@ import { checkIncomingTeleport } from "./teleport.js";
 import { checkMemoryFreshness } from "./runtime.js";
 import { createRegistryFromConfig, type AgentRegistry } from "./agent-registry.js";
 import { setDelegateRegistry } from "./tools/delegate.js";
+import { contentDedup, socialDedup, skoolDedup } from "./patterns.js";
 
 /**
  * Read the restart reason persisted by restart_self, if any.
@@ -113,7 +114,10 @@ async function main() {
   // 2. Start all agents
   await bootAgents(registry);
 
-  // 3. Inject registry into delegation tool so home agent can delegate
+  // 3. Warm up dedup caches from disk
+  await Promise.all([contentDedup.warmup(), socialDedup.warmup(), skoolDedup.warmup()]);
+
+  // 4. Inject registry into delegation tool so home agent can delegate
   setDelegateRegistry(registry);
 
   // 4. Start cache heartbeat on all agents (55min keep-alive, prevents Anthropic cache expiry)

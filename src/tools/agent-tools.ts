@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { KODA_HOME } from "../config.js";
+import { contentDedup, socialDedup, skoolDedup } from "../patterns.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -724,6 +725,76 @@ const removeSkill = tool(
 
 // --- MCP Server ---
 
+// --- Content dedup tools ---
+
+const dedupInstances = { content: contentDedup, social: socialDedup, skool: skoolDedup };
+
+const checkDedup = tool(
+  "check_dedup",
+  "Check if content has already been posted (duplicate detection). " +
+  "Returns 'available' (safe to post), 'duplicate' (already posted), or 'inflight' (another agent is posting it). " +
+  "ALWAYS call this before creating or posting any content.",
+  {
+    channel: z.enum(["content", "social", "skool"]).describe("Which dedup namespace to check"),
+    key: z.string().describe("Unique identifier — use a normalized topic/title/slug, not the full content"),
+  },
+  async ({ channel, key }) => {
+    const dedup = dedupInstances[channel];
+    const status = dedup.check(key.toLowerCase().trim());
+    return textResult(`[${channel}] "${key}": ${status}`);
+  },
+);
+
+const claimDedup = tool(
+  "claim_dedup",
+  "Claim a content key before posting — prevents other agents from posting the same thing. " +
+  "Call check_dedup first, then claim_dedup before you start drafting, then commit_dedup after posting. " +
+  "If the task fails, call release_dedup to free the key.",
+  {
+    channel: z.enum(["content", "social", "skool"]),
+    key: z.string().describe("Same key used in check_dedup"),
+  },
+  async ({ channel, key }) => {
+    const dedup = dedupInstances[channel];
+    const claimed = dedup.claim(key.toLowerCase().trim());
+    if (!claimed) {
+      const status = dedup.check(key.toLowerCase().trim());
+      return textResult(`FAILED to claim [${channel}] "${key}" — status: ${status}`);
+    }
+    return textResult(`CLAIMED [${channel}] "${key}" — proceed with drafting/posting. Call commit_dedup after posting.`);
+  },
+);
+
+const commitDedup = tool(
+  "commit_dedup",
+  "Mark content as permanently posted — call after successful publish. " +
+  "This prevents any agent from posting the same topic again.",
+  {
+    channel: z.enum(["content", "social", "skool"]),
+    key: z.string(),
+  },
+  async ({ channel, key }) => {
+    const dedup = dedupInstances[channel];
+    dedup.commit(key.toLowerCase().trim());
+    await dedup.flush();
+    return textResult(`COMMITTED [${channel}] "${key}" — permanently marked as posted.`);
+  },
+);
+
+const releaseDedup = tool(
+  "release_dedup",
+  "Release a claimed key (e.g., task failed, draft rejected). Frees the key for future use.",
+  {
+    channel: z.enum(["content", "social", "skool"]),
+    key: z.string(),
+  },
+  async ({ channel, key }) => {
+    const dedup = dedupInstances[channel];
+    dedup.release(key.toLowerCase().trim());
+    return textResult(`RELEASED [${channel}] "${key}" — available for future use.`);
+  },
+);
+
 export const agentToolsServer = createSdkMcpServer({
   name: "agent-tools",
   version: "0.1.0",
@@ -738,5 +809,9 @@ export const agentToolsServer = createSdkMcpServer({
     installClaudePlugin,
     listInstalledSkills,
     removeSkill,
+    checkDedup,
+    claimDedup,
+    commitDedup,
+    releaseDedup,
   ],
 });
